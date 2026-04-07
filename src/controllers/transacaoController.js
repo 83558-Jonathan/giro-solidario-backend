@@ -68,7 +68,6 @@ exports.confirmarDeposito = async (req, res) => {
     const { transacaoId } = req.params;
     const { comprovante } = req.body;
 
-    // Validação básica
     if (!comprovante) {
       return res.status(400).json({
         success: false,
@@ -93,7 +92,6 @@ exports.confirmarDeposito = async (req, res) => {
       });
     }
 
-    // Verificar status
     if (transacao.status !== 'pendente') {
       return res.status(400).json({
         success: false,
@@ -122,17 +120,19 @@ exports.confirmarDeposito = async (req, res) => {
         participante.dataDeposito = new Date();
         participante.comprovantePix = comprovante;
 
-        rodada.totalDepositosConfirmados = (rodada.totalDepositosConfirmados || 0) + 1;
+        // Contar vermelhos pagos
+        const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho');
+        const vermelhosPagos = vermelhos.filter(v => v.depositoConfirmado === true);
+        rodada.totalDepositosConfirmados = vermelhosPagos.length;
 
         await rodada.save();
 
         console.log(`✅ Pagamento confirmado: ${participante.usuario} - ${rodada.totalDepositosConfirmados}/8`);
 
         // Após atualizar rodada, verificar se todos pagaram
-        if (rodada.totalDepositosConfirmados === 8) {
+        if (vermelsPagos.length === 8) {
           console.log(`🎉 [confirmarDeposito] ÚLTIMO PAGAMENTO! Chamando verificarTodosDepositos...`);
 
-          // Chamar diretamente sem setImmediate
           try {
             const RodadaService = require('../services/rodadaService');
             const result = await RodadaService.verificarTodosDepositos(rodada._id);
@@ -144,7 +144,6 @@ exports.confirmarDeposito = async (req, res) => {
       }
     }
 
-    // Buscar transação atualizada com populado
     const transacaoAtualizada = await Transacao.findById(transacaoId)
       .populate('pagador', 'nome')
       .populate('recebedor', 'nome');

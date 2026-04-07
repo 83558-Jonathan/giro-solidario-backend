@@ -16,17 +16,17 @@ exports.criarRodada = async (req, res) => {
 exports.listarRodadas = async (req, res) => {
   try {
     const db = mongoose.connection.db;
-    
+
     // Buscar todas as rodadas em andamento e verificar se precisam avançar
     const rodadasEmAndamento = await db.collection('rodadas')
       .find({ status: 'em_andamento' })
       .toArray();
-    
+
     // Verificar cada rodada em andamento
     for (const rodada of rodadasEmAndamento) {
       await RodadaService.verificarEAvancarSeNecessario(rodada._id.toString());
     }
-    
+
     // Buscar todas as rodadas atualizadas
     const rodadas = await db.collection('rodadas')
       .find({})
@@ -146,7 +146,8 @@ exports.getMandala = async (req, res) => {
     }
 
     // ===========================================
-    // NOVO: Verificar e avançar automaticamente se necessário
+    // VERIFICAR E AVANÇAR AUTOMATICAMENTE SE NECESSÁRIO
+    // Isso garante que quando todos pagarem, a rodada avance
     // ===========================================
     await RodadaService.verificarEAvancarSeNecessario(rodadaId);
 

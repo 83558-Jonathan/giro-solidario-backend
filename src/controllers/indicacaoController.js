@@ -6,7 +6,7 @@ exports.minhasIndicacoes = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId)
       .populate('meusIndicados', 'nome email createdAt');
-    
+
     res.json({
       success: true,
       count: usuario.meusIndicados.length,
@@ -23,7 +23,7 @@ exports.meuIndicador = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId)
       .populate('indicadoPor', 'nome email codigoConvite');
-    
+
     res.json({
       success: true,
       data: usuario.indicadoPor || null
@@ -38,37 +38,53 @@ exports.meuIndicador = async (req, res) => {
 exports.verificarPermissaoCaptacao = async (req, res) => {
   try {
     const { rodadaId } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
       return res.status(400).json({ success: false, error: 'ID da rodada inválido' });
     }
-    
+
     const db = mongoose.connection.db;
     const objectId = new mongoose.Types.ObjectId(rodadaId);
-    
-    const rodada = await db.collection('rodadas').findOne({ 
-      _id: objectId 
+
+    const rodada = await db.collection('rodadas').findOne({
+      _id: objectId
     });
-    
+
     if (!rodada) {
       return res.status(404).json({ success: false, error: 'Rodada não encontrada' });
     }
-    
+
+    // Encontrar o participante atual
     const participante = rodada.participantes?.find(
-      p => p.usuario.toString() === req.usuarioId && p.cor === 'azul'
+      p => p.usuario.toString() === req.usuarioId
     );
-    
+
+    // Verificar se é AZUL (apenas AZUL pode captar)
+    const isAzul = participante?.cor === 'azul';
+
+    // Contar quantos indicados ele já trouxe para esta rodada
     const indicadosNaRodada = rodada.participantes?.filter(
       p => p.indicadoPor?.toString() === req.usuarioId
-    ).length || 0;
-    
+    ) || [];
+
+    // Pegar os IDs dos indicados nesta rodada
+    const indicadosIds = indicadosNaRodada.map(p => p.usuario.toString());
+
+    console.log(`🔍 Verificando permissão para usuário ${req.usuarioId} na rodada ${rodadaId}`);
+    console.log(`   Cor do participante: ${participante?.cor || 'não encontrado'}`);
+    console.log(`   É AZUL: ${isAzul}`);
+    console.log(`   Indicados nesta rodada: ${indicadosNaRodada.length}`);
+    console.log(`   IDs dos indicados:`, indicadosIds);
+
     res.json({
       success: true,
       data: {
-        isAzul: !!participante,
-        podeAdicionar: participante ? Math.max(0, 2 - indicadosNaRodada) : 0,
-        jaAdicionou: indicadosNaRodada,
-        limite: 2
+        isAzul: isAzul,
+        podeAdicionar: isAzul ? Math.max(0, 2 - indicadosNaRodada.length) : 0,
+        jaAdicionou: indicadosNaRodada.length,
+        limite: 2,
+        cor: participante?.cor || null,
+        indicadosNestaRodada: indicadosIds  // NOVO: retorna os IDs dos indicados
       }
     });
   } catch (error) {
@@ -81,18 +97,18 @@ exports.verificarPermissaoCaptacao = async (req, res) => {
 exports.gerarLinkConvite = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId);
-    
+
     if (!usuario) {
       return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
     }
-    
+
     if (!usuario.codigoConvite) {
       usuario.codigoConvite = 'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase();
       await usuario.save();
     }
-    
+
     const link = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/register?convite=${usuario.codigoConvite}`;
-    
+
     res.json({
       success: true,
       data: {
@@ -110,13 +126,13 @@ exports.gerarLinkConvite = async (req, res) => {
 exports.verificarRodadaAtiva = async (req, res) => {
   try {
     const usuarioId = req.usuarioId;
-    
+
     const db = mongoose.connection.db;
     const rodada = await db.collection('rodadas').findOne({
       status: 'aguardando',
       'participantes.usuario': usuarioId
     });
-    
+
     res.json({
       success: true,
       data: {
