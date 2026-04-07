@@ -7,7 +7,13 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://187.127.17.74:3000',
+    'http://localhost:3000'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -91,8 +97,8 @@ app.use((req, res) => {
 // Middleware de erro global
 app.use((err, req, res, next) => {
   console.error('❌ Erro:', err.stack);
-  res.status(500).json({ 
-    error: 'Erro interno do servidor', 
+  res.status(500).json({
+    error: 'Erro interno do servidor',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
