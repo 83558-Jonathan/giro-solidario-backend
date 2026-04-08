@@ -7,13 +7,23 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
+const allowedOrigins = [
+  'https://giropremiados.com.br',
+  'https://www.giropremiados.com.br',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: [
-    'http://187.127.17.74:3000',
-    'http://localhost:3000'
-  ],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
