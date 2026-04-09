@@ -118,7 +118,7 @@ async function resetarECriarUsuarios() {
     console.log(`\n${colors.cyan}⚙️ Criando configurações...${colors.reset}`);
     
     const configuracoes = [
-      { chave: 'sistema', valor: { nome: 'Giro Solidário', versao: '1.0.0', valorDeposito: 125, valorRecebimento: 1000, totalParticipantes: 15 } },
+      { chave: 'sistema', valor: { nome: 'Giro Premiado', versao: '1.0.0', valorDeposito: 125, valorRecebimento: 1000, totalParticipantes: 15 } },
       { chave: 'pix', valor: { tiposChave: ['cpf', 'email', 'telefone', 'aleatoria'], taxa: 0.10 } },
       { chave: 'notificacoes', valor: { email: true, whatsapp: false, push: true } }
     ];

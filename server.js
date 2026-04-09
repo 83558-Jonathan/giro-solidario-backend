@@ -49,7 +49,7 @@ app.get('/api/health', (req, res) => {
 // Rota raiz com documentação
 app.get('/', (req, res) => {
   res.json({
-    message: 'API Giro Solidário',
+    message: 'API Giro Premiado',
     endpoints: {
       auth: {
         registrar: 'POST /api/auth/registrar',

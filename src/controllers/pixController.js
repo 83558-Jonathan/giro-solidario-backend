@@ -167,7 +167,7 @@ exports.criarCobrancaPix = async (req, res) => {
 
         const payload = {
             amount: valorCentavos,
-            description: `Giro Solidário - ${transacao.pagador.nome}`,
+            description: `Giro Premiado - ${transacao.pagador.nome}`,
             expiresIn: 3600,
             metadata: {
                 externalId: transacao._id.toString()
@@ -347,7 +347,7 @@ exports.renovarCobrancaPix = async (req, res) => {
         // Criar NOVO QR Code na AbacatePay
         const payload = {
             amount: valorCentavos,
-            description: `Giro Solidário - ${transacao.pagador.nome}`,
+            description: `Giro Premiado - ${transacao.pagador.nome}`,
             expiresIn: 3600,
             metadata: {
                 externalId: transacao._id.toString()

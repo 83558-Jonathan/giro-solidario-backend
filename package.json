@@ -39,5 +39,5 @@
   "devDependencies": {
     "nodemon": "^3.1.14"
   },
-  "description": "Backend do Sistema Giro Solidário"
+  "description": "Backend do Sistema Giro Premiado"
 }

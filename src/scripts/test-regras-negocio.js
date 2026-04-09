@@ -56,7 +56,7 @@ class TesteRegrasNegocio {
   }
 
   async testarRodadaCompleta() {
-    console.log(`${colors.magenta}${colors.bright}🧪 TESTANDO REGRAS DE NEGÓCIO DO GIRO SOLIDÁRIO${colors.reset}\n`);
+    console.log(`${colors.magenta}${colors.bright}🧪 TESTANDO REGRAS DE NEGÓCIO DO Giro Premiado${colors.reset}\n`);
 
     // Limpar rodadas de teste anteriores
     await this.limparRodadasTeste();

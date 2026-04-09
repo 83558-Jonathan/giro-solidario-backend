@@ -192,7 +192,7 @@ class DatabaseSetup {
       {
         chave: 'sistema',
         valor: {
-          nome: 'Giro Solidário',
+          nome: 'Giro Premiado',
           versao: '1.0.0',
           valorDeposito: 125,
           valorRecebimento: 1000,
