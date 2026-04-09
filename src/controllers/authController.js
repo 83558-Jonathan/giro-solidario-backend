@@ -176,6 +176,8 @@ exports.login = async (req, res) => {
   try {
     const { email, senha } = req.body;
 
+    console.log('Tentativa de login:', { email });
+
     if (!email || !senha) {
       return res.status(400).json({
         success: false,
@@ -186,14 +188,24 @@ exports.login = async (req, res) => {
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      return res.status(401).json({ success: false, error: 'Credenciais invalidas' });
+      console.log('Usuario nao encontrado:', email);
+      return res.status(401).json({
+        success: false,
+        error: 'Email ou senha invalidos'
+      });
     }
 
     const senhaCorreta = await bcrypt.compare(senha, usuario.senha);
 
     if (!senhaCorreta) {
-      return res.status(401).json({ success: false, error: 'Credenciais invalidas' });
+      console.log('Senha incorreta para:', email);
+      return res.status(401).json({
+        success: false,
+        error: 'Email ou senha invalidos'
+      });
     }
+
+    console.log('Login bem sucedido:', email);
 
     const token = gerarToken(usuario._id);
 
@@ -212,7 +224,7 @@ exports.login = async (req, res) => {
     console.error('Erro no login:', error);
     res.status(500).json({
       success: false,
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro interno no servidor'
+      error: 'Erro interno no servidor. Tente novamente mais tarde.'
     });
   }
 };
