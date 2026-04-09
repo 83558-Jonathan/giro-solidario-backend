@@ -16,18 +16,21 @@ const userSchema = new mongoose.Schema({
   meusIndicados: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   totalIndicacoes: { type: Number, default: 0 },
   indicacoesConfirmadas: { type: Number, default: 0 },
+
+  // Campos para recuperacao de senha
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date },
+
   createdAt: { type: Date, default: Date.now }
 });
 
-// SEM HOOKS! Vamos fazer a criptografia no controller
-
-// Método para comparar senha (ainda útil)
-userSchema.methods.compararSenha = async function(senha) {
+// Metodo para comparar senha
+userSchema.methods.compararSenha = async function (senha) {
   return await bcrypt.compare(senha, this.senha);
 };
 
-// Gerar código de convite (método, não hook)
-userSchema.methods.gerarCodigoConvite = function() {
+// Gerar codigo de convite
+userSchema.methods.gerarCodigoConvite = function () {
   this.codigoConvite = 'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase();
 };
 
