@@ -106,7 +106,12 @@ class RodadaService {
   // Adicionar participante como VERMELHO
   async adicionarParticipanteVermelho(rodadaId, usuarioId, indicadorId = null) {
     try {
-      console.log(`🔍 [VERMELHO] Tentando adicionar usuário ${usuarioId} à rodada ${rodadaId}`);
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`🔴 [VERMELHO] INICIANDO PROCESSO`);
+      console.log(`${'='.repeat(60)}`);
+      console.log(`   Rodada ID: ${rodadaId}`);
+      console.log(`   Usuário ID: ${usuarioId}`);
+      console.log(`   Indicador ID: ${indicadorId || 'nenhum'}`);
 
       const rodada = await Rodada.findById(rodadaId);
       if (!rodada) {
@@ -114,26 +119,61 @@ class RodadaService {
         throw new Error('Rodada não encontrada');
       }
 
+      console.log(`\n📊 DADOS DA RODADA:`);
+      console.log(`   Nome: ${rodada.nome}`);
+      console.log(`   Status: ${rodada.status}`);
+      console.log(`   Participantes: ${rodada.participantes.length}/15`);
+      console.log(`   Verde definido: ${rodada.verde ? 'SIM' : 'NÃO'}`);
+      console.log(`   Pretos: ${rodada.pretos?.length || 0}`);
+      console.log(`   Azuis: ${rodada.azuis?.length || 0}`);
+      console.log(`   Vermelhos: ${rodada.vermelhos?.length || 0}`);
+
+      // Contar participantes por cor
+      const cores = {
+        verde: rodada.participantes.filter(p => p.cor === 'verde').length,
+        preto: rodada.participantes.filter(p => p.cor === 'preto').length,
+        azul: rodada.participantes.filter(p => p.cor === 'azul').length,
+        vermelho: rodada.participantes.filter(p => p.cor === 'vermelho').length,
+        amarelo: rodada.participantes.filter(p => p.cor === 'amarelo').length
+      };
+      console.log(`   Distribuição de cores:`);
+      console.log(`      🟢 Verde: ${cores.verde}`);
+      console.log(`      ⚫ Preto: ${cores.preto}`);
+      console.log(`      🔵 Azul: ${cores.azul}`);
+      console.log(`      🔴 Vermelho: ${cores.vermelho}`);
+      console.log(`      🟡 Amarelo: ${cores.amarelo}`);
+
       // VERIFICAR SE A RODADA PODE RECEBER VERMELHOS
-      // Pode receber se: 
-      // 1. Está em andamento, ou
-      // 2. Está aguardando mas já tem a estrutura (verde, pretos, azuis)
+      const temEstrutura = rodada.verde && rodada.pretos && rodada.azuis;
       const podeReceberVermelho = rodada.status === 'em_andamento' ||
-        (rodada.status === 'aguardando' && rodada.verde && rodada.pretos && rodada.azuis && rodada.vermelhos);
+        (rodada.status === 'aguardando' && temEstrutura);
+
+      console.log(`\n🔍 VERIFICANDO SE PODE RECEBER VERMELHO:`);
+      console.log(`   Status: ${rodada.status}`);
+      console.log(`   Tem estrutura (verde/pretos/azuis): ${temEstrutura ? 'SIM' : 'NÃO'}`);
+      console.log(`   Pode receber vermelho: ${podeReceberVermelho ? 'SIM' : 'NÃO'}`);
 
       if (!podeReceberVermelho) {
-        console.error(`❌ [VERMELHO] Rodada não pode receber vermelhos. Status: ${rodada.status}`);
-        console.log(`   verde: ${!!rodada.verde}, pretos: ${rodada.pretos?.length}, azuis: ${rodada.azuis?.length}`);
-        throw new Error('Esta rodada ainda está em formação. Aguarde completar os participantes.');
+        console.log(`\n⚠️ [VERMELHO] Rodada NÃO pode receber vermelhos!`);
+        console.log(`   Motivo: ${rodada.status === 'aguardando' && !temEstrutura ? 'Rodada em formação (aguardando completar 15 participantes)' : 'Status inválido'}`);
+        console.log(`   → Será adicionado como AMARELO na rodada ${rodada.nome}\n`);
+
+        // Em vez de lançar erro, chama adicionarParticipanteAmarelo
+        return await this.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
       }
 
       // Verificar se ainda há vagas para vermelhos (máximo 8)
       const vermelhosAtuais = rodada.participantes.filter(p => p.cor === 'vermelho').length;
+      console.log(`\n📊 VERIFICANDO VAGAS:`);
+      console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`);
+      console.log(`   Vagas disponíveis: ${8 - vermelhosAtuais}`);
+
       if (vermelhosAtuais >= 8) {
         console.error(`❌ [VERMELHO] Rodada já possui 8 vermelhos`);
         throw new Error('Esta rodada já possui 8 vermelhos. Aguarde a próxima rodada.');
       }
 
+      // Verificar se usuário já está na rodada
       const existe = rodada.participantes.find(
         p => p.usuario.toString() === usuarioId
       );
@@ -142,19 +182,25 @@ class RodadaService {
         throw new Error('Usuário já está nesta rodada');
       }
 
-      console.log(`🔍 [VERMELHO] Buscando usuário ${usuarioId}...`);
+      // Buscar usuário
+      console.log(`\n👤 BUSCANDO USUÁRIO...`);
       const usuario = await User.findById(usuarioId);
       if (!usuario) {
         console.error(`❌ [VERMELHO] Usuário não encontrado: ${usuarioId}`);
         throw new Error(`Usuário não encontrado: ${usuarioId}`);
       }
-      console.log(`✅ [VERMELHO] Usuário encontrado: ${usuario.nome}`);
+      console.log(`✅ Usuário encontrado: ${usuario.nome} (${usuario.email})`);
 
       // Adicionar como vermelho
+      console.log(`\n➕ ADICIONANDO PARTICIPANTE...`);
+      const novaPosicao = rodada.participantes.length + 1;
+      console.log(`   Posição: ${novaPosicao}`);
+      console.log(`   Cor: VERMELHO`);
+
       rodada.participantes.push({
         usuario: usuarioId,
         cor: 'vermelho',
-        posicao: rodada.participantes.length + 1,
+        posicao: novaPosicao,
         dataEntrada: new Date(),
         depositoConfirmado: false,
         indicadoPor: indicadorId || null
@@ -162,40 +208,58 @@ class RodadaService {
 
       // Atualizar array de vermelhos da rodada
       rodada.vermelhos.push(usuarioId);
+      console.log(`   Vermelhos agora: ${rodada.vermelhos.length}/8`);
 
       if (indicadorId) {
+        console.log(`   Atualizando indicação...`);
         await User.findByIdAndUpdate(usuarioId, { indicadoPor: indicadorId });
         await User.findByIdAndUpdate(indicadorId, {
           $inc: { totalIndicacoes: 1 },
           $push: { meusIndicados: usuarioId }
         });
+        console.log(`   ✅ Indicação registrada para ${indicadorId}`);
       }
 
-      // Se a rodada estava aguardando, agora que tem vermelho, vamos mantê-la
-      // Se completar 15, atualizar
+      // Verificar se completou 15 participantes
+      console.log(`\n🎯 VERIFICANDO COMPLETUDE DA RODADA:`);
+      console.log(`   Participantes agora: ${rodada.participantes.length}/15`);
+
       if (rodada.participantes.length === 15) {
-        console.log(`🎯 Rodada ${rodada.nome} completou 15 participantes!`);
+        console.log(`🎉 Rodada ${rodada.nome} completou 15 participantes!`);
 
         // Se estava aguardando, agora inicia
         if (rodada.status === 'aguardando') {
+          console.log(`   Status antes: aguardando`);
           rodada.status = 'em_andamento';
+          console.log(`   Status depois: em_andamento`);
         }
 
         await rodada.save();
+        console.log(`   ✅ Rodada salva`);
 
         // Criar transações para todos os vermelhos
+        console.log(`   💰 Criando transações para ${rodada.vermelhos.length} vermelhos...`);
         await this.criarTransacoesParaVermelhos(rodadaId);
+        console.log(`   ✅ Transações criadas`);
       } else {
         await rodada.save();
+        console.log(`   ✅ Rodada salva (ainda faltam ${15 - rodada.participantes.length} participantes)`);
       }
 
-      console.log(`✅ Novo vermelho ${usuario.nome} adicionado à ${rodada.nome}`);
-      console.log(`📊 Vermelhos agora: ${rodada.vermelhos.length}/8`);
-      console.log(`📊 Total participantes: ${rodada.participantes.length}/15`);
+      console.log(`\n✅ [VERMELHO] PROCESSO CONCLUÍDO COM SUCESSO!`);
+      console.log(`   Usuário: ${usuario.nome}`);
+      console.log(`   Rodada: ${rodada.nome}`);
+      console.log(`   Status rodada: ${rodada.status}`);
+      console.log(`   Total participantes: ${rodada.participantes.length}/15`);
+      console.log(`   Total vermelhos: ${rodada.vermelhos.length}/8`);
+      console.log(`${'='.repeat(60)}\n`);
 
       return rodada;
     } catch (error) {
-      console.error('❌ Erro ao adicionar participante vermelho:', error);
+      console.error(`\n❌ [VERMELHO] ERRO:`);
+      console.error(`   Mensagem: ${error.message}`);
+      console.error(`   Stack: ${error.stack}`);
+      console.log(`${'='.repeat(60)}\n`);
       throw error;
     }
   }
@@ -951,32 +1015,71 @@ class RodadaService {
   // Buscar rodada do usuário que aceita novos vermelhos
   async buscarRodadaParaNovoVermelho(usuarioId) {
     try {
-      console.log(`🔍 [buscarRodadaParaNovoVermelho] Buscando rodada para usuário ${usuarioId}`);
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`🔍 [buscarRodadaParaNovoVermelho] INICIANDO BUSCA`);
+      console.log(`${'='.repeat(60)}`);
+      console.log(`   Usuário ID: ${usuarioId}`);
 
-      // Buscar rodadas do usuário que estão em andamento OU aguardando (mas já têm estrutura)
+      const user = await User.findById(usuarioId);
+      console.log(`   Usuário: ${user?.nome || 'não encontrado'}`);
+
+      // Buscar rodadas do usuário que estão em 'em_andamento' ou 'aguardando'
       const rodadasDoUsuario = await Rodada.find({
         'participantes.usuario': usuarioId,
         status: { $in: ['em_andamento', 'aguardando'] }
-      }).sort({ numero: -1 }); // Pega a mais recente primeiro
+      }).sort({ numero: -1 });
 
-      console.log(`   Encontradas ${rodadasDoUsuario.length} rodadas para o usuário`);
+      console.log(`\n📊 RODADAS ENCONTRADAS: ${rodadasDoUsuario.length}`);
 
-      // Entre essas, escolher a que ainda tem menos de 8 vermelhos
+      if (rodadasDoUsuario.length === 0) {
+        console.log(`   ❌ Nenhuma rodada encontrada para o usuário`);
+        console.log(`${'='.repeat(60)}\n`);
+        return null;
+      }
+
+      // 🔥 PRIORIDADE 1: Rodadas que JÁ TEM estrutura e podem receber vermelho (em_andamento ou aguardando com estrutura)
       for (const rodada of rodadasDoUsuario) {
         const vermelhosAtuais = rodada.participantes.filter(p => p.cor === 'vermelho').length;
-        const totalParticipantes = rodada.participantes.length;
+        const temEstrutura = !!(rodada.verde && rodada.pretos && rodada.azuis);
 
-        console.log(`   Rodada ${rodada.nome}: status=${rodada.status}, vermelhos=${vermelhosAtuais}/8, total=${totalParticipantes}/15`);
+        // Pode receber vermelho se: 
+        // 1. Está em_andamento, OU
+        // 2. Está aguardando mas já tem estrutura (rodadas avançadas)
+        const podeReceberVermelho = rodada.status === 'em_andamento' ||
+          (rodada.status === 'aguardando' && temEstrutura);
 
-        // Verificar se tem vaga para vermelho (menos de 8)
-        if (vermelhosAtuais < 8) {
-          console.log(`   ✅ Rodada ${rodada.nome} selecionada (tem ${8 - vermelhosAtuais} vagas)`);
+        console.log(`\n   🔎 Analisando rodada ${rodada.nome}:`);
+        console.log(`      - Status: ${rodada.status}`);
+        console.log(`      - Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
+        console.log(`      - Pode receber vermelho: ${podeReceberVermelho ? 'SIM' : 'NÃO'}`);
+        console.log(`      - Vermelhos atuais: ${vermelhosAtuais}/8`);
+        console.log(`      - Total participantes: ${rodada.participantes.length}/15`);
+
+        if (vermelhosAtuais < 8 && podeReceberVermelho) {
+          console.log(`   ✅ Rodada ${rodada.nome} SELECIONADA! (tem estrutura e ${8 - vermelhosAtuais} vagas)`);
           return rodada;
+        } else if (vermelhosAtuais >= 8 && podeReceberVermelho) {
+          console.log(`   ⚠️ Rodada ${rodada.nome} tem estrutura mas está cheia (${vermelhosAtuais}/8 vermelhos)`);
+        } else if (!podeReceberVermelho && temEstrutura) {
+          console.log(`   ⚠️ Rodada ${rodada.nome} tem estrutura mas status inválido: ${rodada.status}`);
         }
       }
 
-      console.log(`   ❌ Nenhuma rodada com vagas para vermelho encontrada`);
-      return null;
+      // 🔥 PRIORIDADE 2: Se não encontrou rodada com estrutura, retorna a rodada mais recente (em formação)
+      // Isso faz o convidado ser adicionado como AMARELO na mesma rodada, não criar uma nova
+      const rodadaMaisRecente = rodadasDoUsuario[0];
+      const vermelhosAtuais = rodadaMaisRecente.participantes.filter(p => p.cor === 'vermelho').length;
+      const temEstrutura = !!(rodadaMaisRecente.verde && rodadaMaisRecente.pretos && rodadaMaisRecente.azuis);
+
+      console.log(`\n   ⚠️ Nenhuma rodada com estrutura e vagas encontrada`);
+      console.log(`   → Usando rodada mais recente: ${rodadaMaisRecente.nome}`);
+      console.log(`   → Status: ${rodadaMaisRecente.status}`);
+      console.log(`   → Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
+      console.log(`   → Vermelhos: ${vermelhosAtuais}/8`);
+      console.log(`   → Convidado será adicionado como ${temEstrutura ? 'VERMELHO' : 'AMARELO'} nesta rodada`);
+      console.log(`${'='.repeat(60)}\n`);
+
+      return rodadaMaisRecente;
     } catch (error) {
       console.error('❌ Erro ao buscar rodada para novo vermelho:', error);
       return null;

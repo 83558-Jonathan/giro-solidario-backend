@@ -79,40 +79,97 @@ exports.registrar = async (req, res) => {
     console.log(`Usuario ${usuario.nome} criado com ID: ${usuario._id}`);
 
     if (indicador) {
-      let rodadaEmAndamento = await RodadaService.buscarRodadaParaNovoVermelho(indicador._id.toString());
+      // Buscar rodada do indicador (pode ser em_andamento ou aguardando)
+      let rodadaDoIndicador = await RodadaService.buscarRodadaParaNovoVermelho(indicador._id.toString());
 
-      if (rodadaEmAndamento) {
-        const vermelhosAtuais = rodadaEmAndamento.participantes.filter(p => p.cor === 'vermelho').length;
+      if (rodadaDoIndicador) {
+        const vermelhosAtuais = rodadaDoIndicador.participantes.filter(p => p.cor === 'vermelho').length;
+        const temEstrutura = !!(rodadaDoIndicador.verde && rodadaDoIndicador.pretos && rodadaDoIndicador.azuis);
 
-        if (vermelhosAtuais < 8) {
-          console.log(`Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaEmAndamento.nome}`);
+        console.log(`\n📋 Processando convite para rodada: ${rodadaDoIndicador.nome}`);
+        console.log(`   Status: ${rodadaDoIndicador.status}`);
+        console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
+        console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`);
+
+        // Se a rodada tem estrutura e tem vaga para vermelho, adiciona como VERMELHO
+        if (temEstrutura && vermelhosAtuais < 8) {
+          console.log(`🔴 Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaDoIndicador.nome}`);
 
           try {
             await RodadaService.adicionarParticipanteVermelho(
-              rodadaEmAndamento._id.toString(),
+              rodadaDoIndicador._id.toString(),
               usuario._id.toString(),
               indicador._id.toString()
             );
 
-            rodadaAdicionada = rodadaEmAndamento.nome;
+            rodadaAdicionada = rodadaDoIndicador.nome;
             corAdicionado = 'vermelho';
-            rodadaIdAdicionada = rodadaEmAndamento._id;
+            rodadaIdAdicionada = rodadaDoIndicador._id;
 
-            console.log(`Usuario ${usuario.nome} adicionado como VERMELHO a rodada ${rodadaEmAndamento.nome}`);
-            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaEmAndamento.nome}`;
+            console.log(`✅ Usuario ${usuario.nome} adicionado como VERMELHO a rodada ${rodadaDoIndicador.nome}`);
+            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}`;
 
           } catch (error) {
-            console.error('Erro ao adicionar como vermelho:', error);
+            console.error('❌ Erro ao adicionar como vermelho:', error);
             mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
           }
-        } else {
-          console.log(`Rodada ${rodadaEmAndamento.nome} ja tem 8 vermelhos`);
-          mensagemAuto = `A rodada do seu convidante ja esta completa. Voce foi adicionado como AMARELO em uma nova rodada.`;
+        }
+        // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO na MESMA rodada
+        else if (!temEstrutura) {
+          console.log(`🟡 Adicionando ${usuario.nome} como AMARELO na rodada existente ${rodadaDoIndicador.nome} (ainda em formacao)`);
+
+          try {
+            await RodadaService.adicionarParticipanteAmarelo(
+              rodadaDoIndicador._id.toString(),
+              usuario._id.toString(),
+              indicador._id.toString()
+            );
+
+            rodadaAdicionada = rodadaDoIndicador.nome;
+            corAdicionado = 'amarelo';
+            rodadaIdAdicionada = rodadaDoIndicador._id;
+
+            console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`);
+            mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`;
+
+          } catch (error) {
+            console.error('❌ Erro ao adicionar como amarelo:', error);
+            mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+          }
+        }
+        // Se tem estrutura mas está cheia de vermelhos
+        else if (temEstrutura && vermelhosAtuais >= 8) {
+          console.log(`⚠️ Rodada ${rodadaDoIndicador.nome} esta cheia de vermelhos (${vermelhosAtuais}/8)`);
+          mensagemAuto = `A rodada do seu convidante esta completa. Uma nova rodada sera criada para voce.`;
+
+          // Criar nova rodada
+          console.log(`🆕 Criando nova rodada para o indicador ${indicador.nome}...`);
+          const novaRodada = await RodadaService.criarRodada(indicador._id.toString());
+
+          if (novaRodada) {
+            try {
+              await RodadaService.adicionarParticipanteAmarelo(
+                novaRodada._id.toString(),
+                usuario._id.toString(),
+                indicador._id.toString()
+              );
+
+              rodadaAdicionada = novaRodada.nome;
+              corAdicionado = 'amarelo';
+              rodadaIdAdicionada = novaRodada._id;
+              mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Voce foi adicionado como AMARELO.`;
+
+              console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
+            } catch (error) {
+              console.error('❌ Erro ao adicionar como amarelo:', error);
+              mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+            }
+          }
         }
       }
-
-      if (!rodadaAdicionada) {
-        console.log(`Criando nova rodada para o indicador ${indicador.nome}...`);
+      // Se o indicador não tem nenhuma rodada, criar uma nova
+      else {
+        console.log(`🆕 Indicador ${indicador.nome} nao tem rodada. Criando nova rodada...`);
 
         const novaRodada = await RodadaService.criarRodada(indicador._id.toString());
 
@@ -129,9 +186,9 @@ exports.registrar = async (req, res) => {
             rodadaIdAdicionada = novaRodada._id;
             mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Voce foi adicionado como AMARELO.`;
 
-            console.log(`Usuario ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
+            console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
           } catch (error) {
-            console.error('Erro ao adicionar como amarelo:', error);
+            console.error('❌ Erro ao adicionar como amarelo:', error);
             mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
           }
         }
@@ -170,7 +227,7 @@ exports.registrar = async (req, res) => {
   }
 };
 
-// LOGIN - CORRIGIDO
+// LOGIN
 exports.login = async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -254,7 +311,7 @@ exports.getMe = async (req, res) => {
   }
 };
 
-// ESQUECEU A SENHA - CORRIGIDO
+// ESQUECEU A SENHA
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -272,14 +329,12 @@ exports.forgotPassword = async (req, res) => {
 
     if (!usuario) {
       console.log('Usuario nao encontrado para recuperacao:', email);
-      // Por segurança, retorna 200 mesmo se não encontrar (evita enumeração de emails)
       return res.status(200).json({
         success: true,
         message: 'Se o email existir, enviaremos um link de recuperacao'
       });
     }
 
-    // Gerar token de recuperacao
     const token = crypto.randomBytes(32).toString('hex');
     const expires = new Date();
     expires.setHours(expires.getHours() + 1);
