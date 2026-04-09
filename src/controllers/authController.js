@@ -5,14 +5,13 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const RodadaService = require('../services/rodadaService');
 
-// Configuracao de email (ajuste conforme seu servico de email)
+// Configuracao de email
 const nodemailer = require('nodemailer');
 
-// Configurar transporter (exemplo com Gmail)
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
+  host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+  port: parseInt(process.env.SMTP_PORT) || 465,
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
@@ -23,7 +22,7 @@ const gerarToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 };
 
-// REGISTRAR COM CRIACAO AUTOMATICA DE RODADA
+// REGISTRAR
 exports.registrar = async (req, res) => {
   try {
     console.log('Registro recebido:', req.body);
@@ -171,7 +170,7 @@ exports.registrar = async (req, res) => {
   }
 };
 
-// LOGIN
+// LOGIN - CORRIGIDO
 exports.login = async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -179,6 +178,7 @@ exports.login = async (req, res) => {
     console.log('Tentativa de login:', { email });
 
     if (!email || !senha) {
+      console.log('Campos faltando');
       return res.status(400).json({
         success: false,
         error: 'Email e senha sao obrigatorios'
@@ -209,7 +209,7 @@ exports.login = async (req, res) => {
 
     const token = gerarToken(usuario._id);
 
-    res.json({
+    return res.status(200).json({
       success: true,
       token,
       usuario: {
@@ -222,7 +222,7 @@ exports.login = async (req, res) => {
 
   } catch (error) {
     console.error('Erro no login:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Erro interno no servidor. Tente novamente mais tarde.'
     });
@@ -254,10 +254,12 @@ exports.getMe = async (req, res) => {
   }
 };
 
-// ESQUECEU A SENHA - Envia email com link de recuperacao
+// ESQUECEU A SENHA - CORRIGIDO
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
+
+    console.log('Solicitacao de recuperacao de senha:', { email });
 
     if (!email) {
       return res.status(400).json({
@@ -269,27 +271,27 @@ exports.forgotPassword = async (req, res) => {
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      return res.status(404).json({
-        success: false,
-        error: 'Nenhum usuario encontrado com este email'
+      console.log('Usuario nao encontrado para recuperacao:', email);
+      // Por segurança, retorna 200 mesmo se não encontrar (evita enumeração de emails)
+      return res.status(200).json({
+        success: true,
+        message: 'Se o email existir, enviaremos um link de recuperacao'
       });
     }
 
     // Gerar token de recuperacao
     const token = crypto.randomBytes(32).toString('hex');
     const expires = new Date();
-    expires.setHours(expires.getHours() + 1); // Token expira em 1 hora
+    expires.setHours(expires.getHours() + 1);
 
     usuario.resetPasswordToken = token;
     usuario.resetPasswordExpires = expires;
     await usuario.save();
 
-    // Criar link de recuperacao
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://giropremiados.com.br'}/reset-password?token=${token}`;
 
-    // Configurar email
     const mailOptions = {
-      from: `"Giro Premiado" <${process.env.SMTP_USER || 'naoresponder@giropremiado.com'}>`,
+      from: `"Giro Premiado" <${process.env.SMTP_USER || 'naoresponder@giropremiados.com.br'}>`,
       to: usuario.email,
       subject: 'Recuperacao de Senha - Giro Premiado',
       html: `
@@ -332,8 +334,9 @@ exports.forgotPassword = async (req, res) => {
       `
     };
 
-    // Enviar email
     await transporter.sendMail(mailOptions);
+
+    console.log('Email de recuperacao enviado para:', email);
 
     res.json({
       success: true,
@@ -361,7 +364,6 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // Validar senha
     if (senha.length < 6) {
       return res.status(400).json({
         success: false,
@@ -383,7 +385,6 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // Buscar usuario com token valido
     const usuario = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: new Date() }
@@ -396,11 +397,9 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // Criptografar nova senha
     const salt = await bcrypt.genSalt(10);
     const senhaHash = await bcrypt.hash(senha, salt);
 
-    // Atualizar senha e limpar campos de recuperacao
     usuario.senha = senhaHash;
     usuario.resetPasswordToken = undefined;
     usuario.resetPasswordExpires = undefined;
