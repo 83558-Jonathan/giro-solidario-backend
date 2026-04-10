@@ -32,14 +32,14 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ MongoDB Conectado'))
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
-// Rotas - TODAS AS 5
+// Rotas
 app.use('/api/auth', require('./src/routes/auth.routes'));
 app.use('/api/users', require('./src/routes/user.routes'));
 app.use('/api/rodadas', require('./src/routes/rodada.routes'));
 app.use('/api/transacoes', require('./src/routes/transacao.routes'));
 app.use('/api/indicacoes', require('./src/routes/indicacao.routes'));
 app.use('/api/pix', require('./src/routes/pix.routes'));
-app.use('/webhooks', require('./src/routes/webhook.routes'));
+app.use('/api/webhook', require('./src/routes/webhook.routes'));
 
 // Rota de teste
 app.get('/api/health', (req, res) => {
@@ -51,39 +51,12 @@ app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
     endpoints: {
-      auth: {
-        registrar: 'POST /api/auth/registrar',
-        login: 'POST /api/auth/login',
-        me: 'GET /api/auth/me'
-      },
-      users: {
-        listar: 'GET /api/users',
-        buscar: 'GET /api/users/:id',
-        atualizar: 'PUT /api/users/:id',
-        indicados: 'GET /api/users/:id/indicados'
-      },
-      rodadas: {
-        listar: 'GET /api/rodadas',
-        criar: 'POST /api/rodadas',
-        buscar: 'GET /api/rodadas/:id',
-        mandala: 'GET /api/rodadas/:id/mandala',
-        participar: 'POST /api/rodadas/:id/participantes',
-        iniciar: 'POST /api/rodadas/:id/iniciar'
-      },
-      transacoes: {
-        minhas: 'GET /api/transacoes/minhas',
-        estatisticas: 'GET /api/transacoes/estatisticas',
-        porRodada: 'GET /api/transacoes/rodada/:rodadaId',
-        confirmar: 'POST /api/transacoes/:id/confirmar',
-        cancelar: 'POST /api/transacoes/:id/cancelar'
-      },
-      indicacoes: {
-        minhas: 'GET /api/indicacoes/minhas',
-        meuIndicador: 'GET /api/indicacoes/meu-indicador',
-        permissao: 'GET /api/indicacoes/permissao/:rodadaId',
-        gerarLink: 'GET /api/indicacoes/gerar-link',
-        verificarRodada: 'GET /api/indicacoes/verificar-rodada'
-      }
+      auth: { ... },
+      users: { ... },
+      rodadas: { ... },
+      transacoes: { ... },
+      indicacoes: { ... },
+      webhook: 'POST /api/webhook/pix?webhookSecret=SEU_SECRET'
     }
   });
 });
@@ -99,7 +72,8 @@ app.use((req, res) => {
       '/api/users',
       '/api/rodadas',
       '/api/transacoes',
-      '/api/indicacoes'
+      '/api/indicacoes',
+      '/api/webhook/pix'
     ]
   });
 });
