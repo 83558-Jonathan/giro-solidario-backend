@@ -50,13 +50,52 @@ app.get('/api/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
+    version: '1.0.0',
     endpoints: {
-      auth: { ... },
-      users: { ... },
-      rodadas: { ... },
-      transacoes: { ... },
-      indicacoes: { ... },
-      webhook: 'POST /api/webhook/pix?webhookSecret=SEU_SECRET'
+      auth: {
+        registrar: 'POST /api/auth/registrar',
+        login: 'POST /api/auth/login',
+        me: 'GET /api/auth/me',
+        forgotPassword: 'POST /api/auth/forgot-password',
+        resetPassword: 'POST /api/auth/reset-password'
+      },
+      users: {
+        listar: 'GET /api/users',
+        buscar: 'GET /api/users/:id',
+        atualizar: 'PUT /api/users/:id',
+        indicados: 'GET /api/users/:id/indicados'
+      },
+      rodadas: {
+        listar: 'GET /api/rodadas',
+        criar: 'POST /api/rodadas',
+        buscar: 'GET /api/rodadas/:id',
+        mandala: 'GET /api/rodadas/:id/mandala',
+        participar: 'POST /api/rodadas/:id/participantes',
+        iniciar: 'POST /api/rodadas/:id/iniciar',
+        avancar: 'POST /api/rodadas/:id/avancar'
+      },
+      transacoes: {
+        minhas: 'GET /api/transacoes/minhas',
+        estatisticas: 'GET /api/transacoes/estatisticas',
+        porRodada: 'GET /api/transacoes/rodada/:rodadaId',
+        confirmar: 'POST /api/transacoes/:id/confirmar',
+        cancelar: 'POST /api/transacoes/:id/cancelar'
+      },
+      indicacoes: {
+        minhas: 'GET /api/indicacoes/minhas',
+        meuIndicador: 'GET /api/indicacoes/meu-indicador',
+        permissao: 'GET /api/indicacoes/permissao/:rodadaId',
+        gerarLink: 'GET /api/indicacoes/gerar-link',
+        verificarRodada: 'GET /api/indicacoes/verificar-rodada'
+      },
+      pix: {
+        criarCobranca: 'POST /api/pix/criar-cobranca',
+        verificarStatus: 'GET /api/pix/status/:transacaoId',
+        renovarCobranca: 'POST /api/pix/renovar-cobranca'
+      },
+      webhook: {
+        pix: 'POST /api/webhook/pix?webhookSecret=SEU_SECRET'
+      }
     }
   });
 });
@@ -73,6 +112,7 @@ app.use((req, res) => {
       '/api/rodadas',
       '/api/transacoes',
       '/api/indicacoes',
+      '/api/pix',
       '/api/webhook/pix'
     ]
   });
