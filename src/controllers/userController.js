@@ -5,7 +5,7 @@ const mongoose = require('mongoose');
 exports.listarUsuarios = async (req, res) => {
   try {
     const usuarios = await User.find().select('-senha').sort({ nome: 1 });
-    
+
     res.json({
       success: true,
       count: usuarios.length,
@@ -101,8 +101,8 @@ exports.listarIndicados = async (req, res) => {
       });
     }
 
-    const indicados = await User.find({ 
-      indicadoPor: req.params.id 
+    const indicados = await User.find({
+      indicadoPor: req.params.id
     }).select('nome email createdAt');
 
     res.json({

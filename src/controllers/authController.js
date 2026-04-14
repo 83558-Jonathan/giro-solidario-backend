@@ -22,28 +22,119 @@ const gerarToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 };
 
-// REGISTRAR
+// ===========================================
+// FUNÇÃO AUXILIAR: Buscar rodada disponível para usuário SEM convite
+// ===========================================
+async function buscarRodadaDisponivelParaNovoUsuario() {
+  try {
+    console.log(`\n🔍 [SEM CONVITE] Buscando rodada disponível...`);
+
+    // PRIORIDADE 1: Rodada em andamento com vaga para vermelho (menos de 8 vermelhos)
+    const rodadaEmAndamento = await Rodada.findOne({
+      status: 'em_andamento',
+      $expr: {
+        $lt: [
+          { $size: { $filter: { input: '$participantes', as: 'p', cond: { $eq: ['$$p.cor', 'vermelho'] } } } },
+          8
+        ]
+      }
+    }).sort({ createdAt: 1 });
+
+    if (rodadaEmAndamento) {
+      const vermelhosAtuais = rodadaEmAndamento.participantes.filter(p => p.cor === 'vermelho').length;
+      console.log(`✅ [SEM CONVITE] Rodada encontrada: ${rodadaEmAndamento.nome}`);
+      console.log(`   Status: em_andamento, Vermelhos: ${vermelhosAtuais}/8`);
+      console.log(`   → Usuário será adicionado como VERMELHO`);
+      return { rodada: rodadaEmAndamento, tipo: 'vermelho' };
+    }
+
+    // PRIORIDADE 2: Rodada aguardando (em formação) com menos de 15 participantes
+    const rodadaAguardando = await Rodada.findOne({
+      status: 'aguardando',
+      $expr: { $lt: [{ $size: '$participantes' }, 15] }
+    }).sort({ createdAt: 1 });
+
+    if (rodadaAguardando) {
+      const participantesAtuais = rodadaAguardando.participantes.length;
+      const temEstrutura = !!(rodadaAguardando.verde && rodadaAguardando.pretos && rodadaAguardando.azuis);
+
+      console.log(`✅ [SEM CONVITE] Rodada encontrada: ${rodadaAguardando.nome}`);
+      console.log(`   Status: aguardando, Participantes: ${participantesAtuais}/15`);
+      console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
+      console.log(`   → Usuário será adicionado como ${temEstrutura ? 'VERMELHO' : 'AMARELO'}`);
+
+      return {
+        rodada: rodadaAguardando,
+        tipo: temEstrutura ? 'vermelho' : 'amarelo'
+      };
+    }
+
+    // PRIORIDADE 3: Nenhuma rodada disponível - criar nova
+    console.log(`⚠️ [SEM CONVITE] Nenhuma rodada disponível. Criando nova rodada...`);
+    return { rodada: null, tipo: 'nova' };
+
+  } catch (error) {
+    console.error('❌ [SEM CONVITE] Erro ao buscar rodada:', error);
+    return { rodada: null, tipo: 'erro' };
+  }
+}
+
+// ===========================================
+// FUNÇÃO AUXILIAR: Adicionar usuário à rodada
+// ===========================================
+async function adicionarUsuarioRodada(rodada, usuarioId, tipo, indicadorId = null) {
+  try {
+    console.log(`\n➕ [ADICIONAR] Adicionando usuário ${usuarioId} à rodada ${rodada.nome} como ${tipo.toUpperCase()}`);
+
+    if (tipo === 'vermelho') {
+      return await RodadaService.adicionarParticipanteVermelho(
+        rodada._id.toString(),
+        usuarioId.toString(),
+        indicadorId
+      );
+    } else if (tipo === 'amarelo') {
+      return await RodadaService.adicionarParticipanteAmarelo(
+        rodada._id.toString(),
+        usuarioId.toString(),
+        indicadorId
+      );
+    } else {
+      throw new Error(`Tipo inválido: ${tipo}`);
+    }
+  } catch (error) {
+    console.error(`❌ [ADICIONAR] Erro ao adicionar usuário:`, error);
+    throw error;
+  }
+}
+
+// ===========================================
+// REGISTRAR (CORRIGIDO)
+// ===========================================
 exports.registrar = async (req, res) => {
   try {
-    console.log('Registro recebido:', req.body);
+    console.log('📝 Registro recebido:', req.body);
 
     const { nome, email, telefone, cpf, chavePix, tipoChavePix, senha, codigoConvite } = req.body;
 
+    // Validação de campos obrigatórios
     if (!nome || !email || !telefone || !cpf || !chavePix || !tipoChavePix || !senha) {
       return res.status(400).json({
         success: false,
-        error: 'Todos os campos sao obrigatorios'
+        error: 'Todos os campos são obrigatórios'
       });
     }
 
+    // Verificar se usuário já existe
     const existe = await User.findOne({ $or: [{ email }, { cpf }] });
     if (existe) {
-      return res.status(400).json({ success: false, error: 'Usuario ja existe' });
+      return res.status(400).json({ success: false, error: 'Usuário já existe' });
     }
 
+    // Hash da senha
     const salt = await bcrypt.genSalt(10);
     const senhaHash = await bcrypt.hash(senha, salt);
 
+    // Criar usuário
     const usuario = new User({
       nome,
       email,
@@ -62,88 +153,113 @@ exports.registrar = async (req, res) => {
     let corAdicionado = null;
     let rodadaIdAdicionada = null;
 
+    // ===========================================
+    // CASO 1: Usuário tem código de convite
+    // ===========================================
     if (codigoConvite) {
+      console.log(`\n🔗 [COM CONVITE] Código recebido: ${codigoConvite}`);
+
       indicador = await User.findOne({ codigoConvite });
 
       if (indicador) {
+        console.log(`✅ [COM CONVITE] Indicador encontrado: ${indicador.nome}`);
         usuario.indicadoPor = indicador._id;
 
         await User.findByIdAndUpdate(indicador._id, {
           $push: { meusIndicados: usuario._id },
           $inc: { totalIndicacoes: 1 }
         });
-      }
-    }
 
-    await usuario.save();
-    console.log(`Usuario ${usuario.nome} criado com ID: ${usuario._id}`);
+        // Buscar rodada do indicador
+        let rodadaDoIndicador = await RodadaService.buscarRodadaParaNovoVermelho(indicador._id.toString());
 
-    if (indicador) {
-      // Buscar rodada do indicador (pode ser em_andamento ou aguardando)
-      let rodadaDoIndicador = await RodadaService.buscarRodadaParaNovoVermelho(indicador._id.toString());
+        if (rodadaDoIndicador) {
+          const vermelhosAtuais = rodadaDoIndicador.participantes.filter(p => p.cor === 'vermelho').length;
+          const temEstrutura = !!(rodadaDoIndicador.verde && rodadaDoIndicador.pretos && rodadaDoIndicador.azuis);
 
-      if (rodadaDoIndicador) {
-        const vermelhosAtuais = rodadaDoIndicador.participantes.filter(p => p.cor === 'vermelho').length;
-        const temEstrutura = !!(rodadaDoIndicador.verde && rodadaDoIndicador.pretos && rodadaDoIndicador.azuis);
+          console.log(`\n📋 Processando convite para rodada: ${rodadaDoIndicador.nome}`);
+          console.log(`   Status: ${rodadaDoIndicador.status}`);
+          console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
+          console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`);
 
-        console.log(`\n📋 Processando convite para rodada: ${rodadaDoIndicador.nome}`);
-        console.log(`   Status: ${rodadaDoIndicador.status}`);
-        console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`);
-        console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`);
+          // Se a rodada tem estrutura e tem vaga para vermelho, adiciona como VERMELHO
+          if (temEstrutura && vermelhosAtuais < 8) {
+            console.log(`🔴 Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaDoIndicador.nome}`);
 
-        // Se a rodada tem estrutura e tem vaga para vermelho, adiciona como VERMELHO
-        if (temEstrutura && vermelhosAtuais < 8) {
-          console.log(`🔴 Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaDoIndicador.nome}`);
+            try {
+              await RodadaService.adicionarParticipanteVermelho(
+                rodadaDoIndicador._id.toString(),
+                usuario._id.toString(),
+                indicador._id.toString()
+              );
 
-          try {
-            await RodadaService.adicionarParticipanteVermelho(
-              rodadaDoIndicador._id.toString(),
-              usuario._id.toString(),
-              indicador._id.toString()
-            );
+              rodadaAdicionada = rodadaDoIndicador.nome;
+              corAdicionado = 'vermelho';
+              rodadaIdAdicionada = rodadaDoIndicador._id;
 
-            rodadaAdicionada = rodadaDoIndicador.nome;
-            corAdicionado = 'vermelho';
-            rodadaIdAdicionada = rodadaDoIndicador._id;
+              console.log(`✅ Usuário ${usuario.nome} adicionado como VERMELHO à rodada ${rodadaDoIndicador.nome}`);
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}`;
 
-            console.log(`✅ Usuario ${usuario.nome} adicionado como VERMELHO a rodada ${rodadaDoIndicador.nome}`);
-            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}`;
+            } catch (error) {
+              console.error('❌ Erro ao adicionar como vermelho:', error);
+              mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+            }
+          }
+          // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO
+          else if (!temEstrutura) {
+            console.log(`🟡 Adicionando ${usuario.nome} como AMARELO na rodada existente ${rodadaDoIndicador.nome}`);
 
-          } catch (error) {
-            console.error('❌ Erro ao adicionar como vermelho:', error);
-            mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+            try {
+              await RodadaService.adicionarParticipanteAmarelo(
+                rodadaDoIndicador._id.toString(),
+                usuario._id.toString(),
+                indicador._id.toString()
+              );
+
+              rodadaAdicionada = rodadaDoIndicador.nome;
+              corAdicionado = 'amarelo';
+              rodadaIdAdicionada = rodadaDoIndicador._id;
+
+              console.log(`✅ Usuário ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`);
+              mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`;
+
+            } catch (error) {
+              console.error('❌ Erro ao adicionar como amarelo:', error);
+              mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+            }
+          }
+          // Se tem estrutura mas está cheia de vermelhos
+          else if (temEstrutura && vermelhosAtuais >= 8) {
+            console.log(`⚠️ Rodada ${rodadaDoIndicador.nome} está cheia de vermelhos (${vermelhosAtuais}/8)`);
+            mensagemAuto = `A rodada do seu convidante está completa. Uma nova rodada será criada para você.`;
+
+            const novaRodada = await RodadaService.criarRodada(indicador._id.toString());
+
+            if (novaRodada) {
+              try {
+                await RodadaService.adicionarParticipanteAmarelo(
+                  novaRodada._id.toString(),
+                  usuario._id.toString(),
+                  indicador._id.toString()
+                );
+
+                rodadaAdicionada = novaRodada.nome;
+                corAdicionado = 'amarelo';
+                rodadaIdAdicionada = novaRodada._id;
+                mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Você foi adicionado como AMARELO.`;
+
+                console.log(`✅ Usuário ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
+              } catch (error) {
+                console.error('❌ Erro ao adicionar como amarelo:', error);
+                mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+              }
+            }
           }
         }
-        // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO na MESMA rodada
-        else if (!temEstrutura) {
-          console.log(`🟡 Adicionando ${usuario.nome} como AMARELO na rodada existente ${rodadaDoIndicador.nome} (ainda em formacao)`);
+        // Se o indicador não tem nenhuma rodada, criar uma nova
+        else {
+          console.log(`🆕 Indicador ${indicador.nome} não tem rodada. Criando nova rodada...`);
 
-          try {
-            await RodadaService.adicionarParticipanteAmarelo(
-              rodadaDoIndicador._id.toString(),
-              usuario._id.toString(),
-              indicador._id.toString()
-            );
-
-            rodadaAdicionada = rodadaDoIndicador.nome;
-            corAdicionado = 'amarelo';
-            rodadaIdAdicionada = rodadaDoIndicador._id;
-
-            console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`);
-            mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`;
-
-          } catch (error) {
-            console.error('❌ Erro ao adicionar como amarelo:', error);
-            mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
-          }
-        }
-        // Se tem estrutura mas está cheia de vermelhos
-        else if (temEstrutura && vermelhosAtuais >= 8) {
-          console.log(`⚠️ Rodada ${rodadaDoIndicador.nome} esta cheia de vermelhos (${vermelhosAtuais}/8)`);
-          mensagemAuto = `A rodada do seu convidante esta completa. Uma nova rodada sera criada para voce.`;
-
-          // Criar nova rodada
-          console.log(`🆕 Criando nova rodada para o indicador ${indicador.nome}...`);
           const novaRodada = await RodadaService.criarRodada(indicador._id.toString());
 
           if (novaRodada) {
@@ -157,46 +273,91 @@ exports.registrar = async (req, res) => {
               rodadaAdicionada = novaRodada.nome;
               corAdicionado = 'amarelo';
               rodadaIdAdicionada = novaRodada._id;
-              mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Voce foi adicionado como AMARELO.`;
+              mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Você foi adicionado como AMARELO.`;
 
-              console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
+              console.log(`✅ Usuário ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
             } catch (error) {
               console.error('❌ Erro ao adicionar como amarelo:', error);
               mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
             }
           }
         }
-      }
-      // Se o indicador não tem nenhuma rodada, criar uma nova
-      else {
-        console.log(`🆕 Indicador ${indicador.nome} nao tem rodada. Criando nova rodada...`);
+      } else {
+        console.log(`⚠️ [COM CONVITE] Código ${codigoConvite} não encontrado. Tratando como cadastro sem convite...`);
+        // Código inválido - tratar como cadastro sem convite
+        const { rodada, tipo } = await buscarRodadaDisponivelParaNovoUsuario();
 
-        const novaRodada = await RodadaService.criarRodada(indicador._id.toString());
-
-        if (novaRodada) {
+        if (rodada) {
           try {
-            await RodadaService.adicionarParticipanteAmarelo(
-              novaRodada._id.toString(),
-              usuario._id.toString(),
-              indicador._id.toString()
-            );
-
-            rodadaAdicionada = novaRodada.nome;
-            corAdicionado = 'amarelo';
-            rodadaIdAdicionada = novaRodada._id;
-            mensagemAuto = `Nova rodada ${novaRodada.nome} criada! Voce foi adicionado como AMARELO.`;
-
-            console.log(`✅ Usuario ${usuario.nome} adicionado como AMARELO na nova rodada ${novaRodada.nome}`);
+            await adicionarUsuarioRodada(rodada, usuario._id, tipo);
+            rodadaAdicionada = rodada.nome;
+            corAdicionado = tipo;
+            rodadaIdAdicionada = rodada._id;
+            mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${rodada.nome}`;
+            console.log(`✅ Usuário ${usuario.nome} adicionado à rodada existente como ${tipo.toUpperCase()}`);
           } catch (error) {
-            console.error('❌ Erro ao adicionar como amarelo:', error);
+            console.error('❌ Erro ao adicionar usuário à rodada:', error);
             mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
           }
+        } else if (tipo === 'nova') {
+          const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
+          rodadaAdicionada = novaRodada.nome;
+          corAdicionado = 'amarelo';
+          rodadaIdAdicionada = novaRodada._id;
+          mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
+          console.log(`✅ Nova rodada criada para ${usuario.nome}`);
         }
       }
     }
 
+    // ===========================================
+    // CASO 2: Usuário SEM código de convite (cadastro direto)
+    // ===========================================
+    else {
+      console.log(`\n🚫 [SEM CONVITE] Usuário cadastrando sem código de convite`);
+
+      const { rodada, tipo } = await buscarRodadaDisponivelParaNovoUsuario();
+
+      if (rodada) {
+        try {
+          await adicionarUsuarioRodada(rodada, usuario._id, tipo);
+          rodadaAdicionada = rodada.nome;
+          corAdicionado = tipo;
+          rodadaIdAdicionada = rodada._id;
+          mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${rodada.nome}`;
+          console.log(`✅ [SEM CONVITE] Usuário ${usuario.nome} adicionado à rodada existente como ${tipo.toUpperCase()}`);
+        } catch (error) {
+          console.error('❌ [SEM CONVITE] Erro ao adicionar usuário à rodada:', error);
+          mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
+
+          // Fallback: criar nova rodada
+          console.log(`🆕 [SEM CONVITE] Criando nova rodada como fallback...`);
+          const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
+          rodadaAdicionada = novaRodada.nome;
+          corAdicionado = 'amarelo';
+          rodadaIdAdicionada = novaRodada._id;
+          mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
+        }
+      } else if (tipo === 'nova') {
+        // Criar nova rodada para o usuário
+        console.log(`🆕 [SEM CONVITE] Nenhuma rodada disponível. Criando nova rodada...`);
+        const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
+        rodadaAdicionada = novaRodada.nome;
+        corAdicionado = 'amarelo';
+        rodadaIdAdicionada = novaRodada._id;
+        mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
+        console.log(`✅ [SEM CONVITE] Nova rodada criada para ${usuario.nome}`);
+      }
+    }
+
+    // Salvar usuário
+    await usuario.save();
+    console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`);
+
+    // Gerar token
     const token = gerarToken(usuario._id);
 
+    // Montar resposta
     const response = {
       success: true,
       token,
@@ -209,17 +370,23 @@ exports.registrar = async (req, res) => {
     };
 
     if (rodadaAdicionada && corAdicionado) {
-      const corTexto = corAdicionado === 'vermelho' ? 'VERMELHO' : 'AMARELO';
-      response.automatico = `Adicionado a rodada ${rodadaAdicionada} como ${corTexto}`;
+      const corTexto = corAdicionado === 'vermelho' ? 'VERMELHO' : corAdicionado === 'amarelo' ? 'AMARELO' : corAdicionado.toUpperCase();
+      response.automatico = `Adicionado à rodada ${rodadaAdicionada} como ${corTexto}`;
       response.rodadaId = rodadaIdAdicionada;
     } else if (mensagemAuto) {
       response.automatico = mensagemAuto;
     }
 
+    console.log(`\n✅ REGISTRO CONCLUÍDO COM SUCESSO!`);
+    console.log(`   Usuário: ${usuario.nome}`);
+    console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`);
+    console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`);
+    console.log(`${'='.repeat(60)}\n`);
+
     res.status(201).json(response);
 
   } catch (error) {
-    console.error('Erro no registro:', error);
+    console.error('❌ Erro no registro:', error);
     res.status(500).json({
       success: false,
       error: process.env.NODE_ENV === 'development' ? error.message : 'Erro interno no servidor'
@@ -227,7 +394,9 @@ exports.registrar = async (req, res) => {
   }
 };
 
-// LOGIN
+// ===========================================
+// LOGIN (mantido igual)
+// ===========================================
 exports.login = async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -238,17 +407,17 @@ exports.login = async (req, res) => {
       console.log('Campos faltando');
       return res.status(400).json({
         success: false,
-        error: 'Email e senha sao obrigatorios'
+        error: 'Email e senha são obrigatórios'
       });
     }
 
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      console.log('Usuario nao encontrado:', email);
+      console.log('Usuário não encontrado:', email);
       return res.status(401).json({
         success: false,
-        error: 'Email ou senha invalidos'
+        error: 'Email ou senha inválidos'
       });
     }
 
@@ -258,7 +427,7 @@ exports.login = async (req, res) => {
       console.log('Senha incorreta para:', email);
       return res.status(401).json({
         success: false,
-        error: 'Email ou senha invalidos'
+        error: 'Email ou senha inválidos'
       });
     }
 
@@ -286,7 +455,9 @@ exports.login = async (req, res) => {
   }
 };
 
-// GET ME
+// ===========================================
+// GET ME (mantido igual)
+// ===========================================
 exports.getMe = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId)
@@ -297,7 +468,7 @@ exports.getMe = async (req, res) => {
     if (!usuario) {
       return res.status(404).json({
         success: false,
-        error: 'Usuario nao encontrado'
+        error: 'Usuário não encontrado'
       });
     }
 
@@ -311,27 +482,29 @@ exports.getMe = async (req, res) => {
   }
 };
 
-// ESQUECEU A SENHA
+// ===========================================
+// FORGOT PASSWORD (mantido igual)
+// ===========================================
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    console.log('Solicitacao de recuperacao de senha:', { email });
+    console.log('Solicitação de recuperação de senha:', { email });
 
     if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Email é obrigatorio'
+        error: 'Email é obrigatório'
       });
     }
 
     const usuario = await User.findOne({ email });
 
     if (!usuario) {
-      console.log('Usuario nao encontrado para recuperacao:', email);
+      console.log('Usuário não encontrado para recuperação:', email);
       return res.status(200).json({
         success: true,
-        message: 'Se o email existir, enviaremos um link de recuperacao'
+        message: 'Se o email existir, enviaremos um link de recuperação'
       });
     }
 
@@ -348,7 +521,7 @@ exports.forgotPassword = async (req, res) => {
     const mailOptions = {
       from: `"Giro Premiado" <${process.env.SMTP_USER || 'naoresponder@giropremiados.com.br'}>`,
       to: usuario.email,
-      subject: 'Recuperacao de Senha - Giro Premiado',
+      subject: 'Recuperação de Senha - Giro Premiado',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="text-align: center; padding: 20px; background-color: #10B981; border-radius: 10px 10px 0 0;">
@@ -356,15 +529,15 @@ exports.forgotPassword = async (req, res) => {
           </div>
           
           <div style="padding: 30px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0 0 10px 10px;">
-            <h2 style="color: #1f2937; margin-top: 0;">Recuperacao de Senha</h2>
+            <h2 style="color: #1f2937; margin-top: 0;">Recuperação de Senha</h2>
             
             <p style="color: #4b5563; line-height: 1.5;">
-              Ola <strong>${usuario.nome}</strong>,
+              Olá <strong>${usuario.nome}</strong>,
             </p>
             
             <p style="color: #4b5563; line-height: 1.5;">
-              Recebemos uma solicitacao para redefinir sua senha no Giro Premiado.
-              Clique no botao abaixo para criar uma nova senha:
+              Recebemos uma solicitação para redefinir sua senha no Giro Premiado.
+              Clique no botão abaixo para criar uma nova senha:
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
@@ -375,7 +548,7 @@ exports.forgotPassword = async (req, res) => {
             </div>
             
             <p style="color: #4b5563; line-height: 1.5;">
-              Se voce nao solicitou essa alteracao, ignore este email.
+              Se você não solicitou essa alteração, ignore este email.
               O link expira em 1 hora.
             </p>
             
@@ -391,23 +564,25 @@ exports.forgotPassword = async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
-    console.log('Email de recuperacao enviado para:', email);
+    console.log('Email de recuperação enviado para:', email);
 
     res.json({
       success: true,
-      message: 'Email de recuperacao enviado com sucesso'
+      message: 'Email de recuperação enviado com sucesso'
     });
 
   } catch (error) {
     console.error('Erro no forgotPassword:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao enviar email de recuperacao. Tente novamente.'
+      error: 'Erro ao enviar email de recuperação. Tente novamente.'
     });
   }
 };
 
-// REDEFINIR SENHA
+// ===========================================
+// RESET PASSWORD (mantido igual)
+// ===========================================
 exports.resetPassword = async (req, res) => {
   try {
     const { token, senha } = req.body;
@@ -415,7 +590,7 @@ exports.resetPassword = async (req, res) => {
     if (!token || !senha) {
       return res.status(400).json({
         success: false,
-        error: 'Token e nova senha sao obrigatorios'
+        error: 'Token e nova senha são obrigatórios'
       });
     }
 
@@ -429,14 +604,14 @@ exports.resetPassword = async (req, res) => {
     if (!/[A-Z]/.test(senha)) {
       return res.status(400).json({
         success: false,
-        error: 'A senha deve conter pelo menos uma letra maiuscula'
+        error: 'A senha deve conter pelo menos uma letra maiúscula'
       });
     }
 
     if (!/[0-9]/.test(senha)) {
       return res.status(400).json({
         success: false,
-        error: 'A senha deve conter pelo menos um numero'
+        error: 'A senha deve conter pelo menos um número'
       });
     }
 
@@ -448,7 +623,7 @@ exports.resetPassword = async (req, res) => {
     if (!usuario) {
       return res.status(400).json({
         success: false,
-        error: 'Token invalido ou expirado. Solicite um novo link de recuperacao.'
+        error: 'Token inválido ou expirado. Solicite um novo link de recuperação.'
       });
     }
 

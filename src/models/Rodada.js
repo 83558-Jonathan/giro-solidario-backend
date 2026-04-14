@@ -45,7 +45,7 @@ const rodadaSchema = new mongoose.Schema({
     default: 'aguardando'
   },
   participantes: [participanteSchema],
-  
+
   // Referências diretas por cor
   verde: {
     type: mongoose.Schema.Types.ObjectId,
@@ -63,7 +63,7 @@ const rodadaSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
-  
+
   // Controles
   totalDepositosConfirmados: {
     type: Number,
@@ -73,7 +73,7 @@ const rodadaSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
-  
+
   // Histórico de movimentações
   historicoMovimentacoes: [{
     usuario: {
@@ -88,12 +88,12 @@ const rodadaSchema = new mongoose.Schema({
     },
     observacao: String
   }],
-  
+
   // Timeline
   dataInicio: Date,
   dataFim: Date,
   dataTodosDepositaram: Date,
-  
+
   // Relacionamentos
   rodadaOrigem: {
     type: mongoose.Schema.Types.ObjectId,
@@ -103,7 +103,7 @@ const rodadaSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Rodada'
   }],
-  
+
   createdAt: {
     type: Date,
     default: Date.now
@@ -113,16 +113,16 @@ const rodadaSchema = new mongoose.Schema({
 });
 
 // Métodos do modelo
-rodadaSchema.methods.avancarCores = function() {
+rodadaSchema.methods.avancarCores = function () {
   const self = this;
-  
+
   self.participantes.forEach(p => {
     const historico = {
       usuario: p.usuario,
       corAnterior: p.cor,
       data: new Date()
     };
-    
+
     if (p.cor === 'vermelho') {
       p.cor = 'azul';
       historico.corNova = 'azul';
@@ -136,30 +136,30 @@ rodadaSchema.methods.avancarCores = function() {
       p.cor = 'concluido';
       historico.corNova = 'concluido';
     }
-    
+
     if (historico.corNova) {
       self.historicoMovimentacoes.push(historico);
     }
   });
-  
+
   return self;
 };
 
 // Verificar se todos vermelhos depositaram
-rodadaSchema.methods.verificarDepositos = function() {
+rodadaSchema.methods.verificarDepositos = function () {
   const vermelhos = this.participantes.filter(p => p.cor === 'vermelho');
   const todosDepositaram = vermelhos.every(v => v.depositoConfirmado);
-  
+
   if (todosDepositaram && !this.todosDepositaram) {
     this.todosDepositaram = true;
     this.dataTodosDepositaram = new Date();
   }
-  
+
   return todosDepositaram;
 };
 
 // Estatísticas da rodada
-rodadaSchema.methods.getStats = function() {
+rodadaSchema.methods.getStats = function () {
   return {
     totalParticipantes: this.participantes.length,
     verdes: this.participantes.filter(p => p.cor === 'verde').length,
