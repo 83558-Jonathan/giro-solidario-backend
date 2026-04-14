@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Rodada = require('../models/Rodada');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -80,7 +81,7 @@ async function buscarRodadaDisponivelParaNovoUsuario() {
 }
 
 // ===========================================
-// FUNÇÃO AUXILIAR: Adicionar usuário à rodada
+// FUNÇÃO AUXILIAR: Adicionar usuário à rodada (APÓS salvar usuário)
 // ===========================================
 async function adicionarUsuarioRodada(rodada, usuarioId, tipo, indicadorId = null) {
   try {
@@ -108,7 +109,7 @@ async function adicionarUsuarioRodada(rodada, usuarioId, tipo, indicadorId = nul
 }
 
 // ===========================================
-// REGISTRAR (CORRIGIDO)
+// REGISTRAR (CORRIGIDO - PRIMEIRO SALVA USUÁRIO)
 // ===========================================
 exports.registrar = async (req, res) => {
   try {
@@ -146,6 +147,12 @@ exports.registrar = async (req, res) => {
     });
 
     usuario.codigoConvite = 'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+    // ===========================================
+    // PRIMEIRO: SALVAR O USUÁRIO
+    // ===========================================
+    await usuario.save();
+    console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`);
 
     let indicador = null;
     let rodadaAdicionada = null;
@@ -328,7 +335,6 @@ exports.registrar = async (req, res) => {
           console.log(`✅ [SEM CONVITE] Usuário ${usuario.nome} adicionado à rodada existente como ${tipo.toUpperCase()}`);
         } catch (error) {
           console.error('❌ [SEM CONVITE] Erro ao adicionar usuário à rodada:', error);
-          mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
 
           // Fallback: criar nova rodada
           console.log(`🆕 [SEM CONVITE] Criando nova rodada como fallback...`);
@@ -337,6 +343,7 @@ exports.registrar = async (req, res) => {
           corAdicionado = 'amarelo';
           rodadaIdAdicionada = novaRodada._id;
           mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
+          console.log(`✅ [SEM CONVITE] Nova rodada criada para ${usuario.nome}`);
         }
       } else if (tipo === 'nova') {
         // Criar nova rodada para o usuário
@@ -349,10 +356,6 @@ exports.registrar = async (req, res) => {
         console.log(`✅ [SEM CONVITE] Nova rodada criada para ${usuario.nome}`);
       }
     }
-
-    // Salvar usuário
-    await usuario.save();
-    console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`);
 
     // Gerar token
     const token = gerarToken(usuario._id);
