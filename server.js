@@ -40,6 +40,7 @@ app.use('/api/transacoes', require('./src/routes/transacao.routes'));
 app.use('/api/indicacoes', require('./src/routes/indicacao.routes'));
 app.use('/api/pix', require('./src/routes/pix.routes'));
 app.use('/api/webhook', require('./src/routes/webhook.routes'));
+app.use('/api/email', require('./src/routes/email.routes'));
 
 // Rota de teste
 app.get('/api/health', (req, res) => {
