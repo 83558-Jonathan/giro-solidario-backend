@@ -1,16 +1,119 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
+const xss = require('xss-clean');
+const compression = require('compression');
+const timeout = require('connect-timeout');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// Middleware
+// ===========================================
+// CONFIGURAÇÕES DE SEGURANÇA
+// ===========================================
+
+// 1. Helmet - Proteção de headers HTTP
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+// 2. Compressão para respostas
+app.use(compression());
+
+// 3. Timeout para evitar ataques de slowloris
+app.use(timeout('30s'));
+app.use((req, res, next) => {
+  if (!req.timedout) next();
+});
+
+// 4. Remover header X-Powered-By
+app.use((req, res, next) => {
+  res.removeHeader('X-Powered-By');
+  next();
+});
+
+// ===========================================
+// RATE LIMITING
+// ===========================================
+
+// Rate limit geral para API
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 200, // limite de 200 requisições por IP
+  message: { success: false, error: 'Muitas requisições. Tente novamente mais tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Rate limit específico para login (mais restrito)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 5, // apenas 5 tentativas por IP
+  skipSuccessfulRequests: true,
+  message: { success: false, error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
+});
+
+// Rate limit para registro
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 3, // apenas 3 registros por IP
+  message: { success: false, error: 'Muitas tentativas de registro. Tente novamente em 1 hora.' },
+});
+
+// Rate limit para recuperação de senha
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 3, // apenas 3 solicitações por IP
+  message: { success: false, error: 'Muitas solicitações. Tente novamente em 1 hora.' },
+});
+
+// Rate limit para webhook (mais generoso)
+const webhookLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 30, // 30 requisições por minuto (webhook pode enviar várias)
+  skip: (req) => {
+    // Pular rate limit para IPs confiáveis (se necessário)
+    const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',') : [];
+    return trustedIps.includes(req.ip);
+  }
+});
+
+// ===========================================
+// SANITIZAÇÃO
+// ===========================================
+
+// 5. MongoSanitize - Previne NoSQL injection
+app.use(mongoSanitize());
+
+// 6. XSS-Clean - Previne cross-site scripting
+app.use(xss());
+
+// ===========================================
+// MIDDLEWARE PADRÃO
+// ===========================================
+
+// CORS
 const allowedOrigins = [
   'https://giropremiados.com.br',
   'https://www.giropremiados.com.br',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'http://localhost:5001'
 ];
 
 app.use(cors({
@@ -24,15 +127,40 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' })); // Limitar tamanho do JSON
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Conectar MongoDB
-mongoose.connect(process.env.MONGODB_URI)
+// ===========================================
+// APLICAR RATE LIMITERS NAS ROTAS
+// ===========================================
+
+// Aplicar rate limit global antes das rotas
+app.use('/api/', globalLimiter);
+
+// Aplicar rate limits específicos
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/registrar', registerLimiter);
+app.use('/api/auth/forgot-password', forgotPasswordLimiter);
+app.use('/api/webhook/', webhookLimiter);
+
+// ===========================================
+// CONEXÃO MONGODB (COM OPÇÕES DE SEGURANÇA)
+// ===========================================
+
+mongoose.connect(process.env.MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  family: 4, // IPv4
+  maxPoolSize: 10,
+  minPoolSize: 2,
+})
   .then(() => console.log('✅ MongoDB Conectado'))
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
-// Rotas
+// ===========================================
+// ROTAS
+// ===========================================
+
 app.use('/api/auth', require('./src/routes/auth.routes'));
 app.use('/api/users', require('./src/routes/user.routes'));
 app.use('/api/rodadas', require('./src/routes/rodada.routes'));
@@ -44,7 +172,7 @@ app.use('/api/email', require('./src/routes/email.routes'));
 
 // Rota de teste
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Servidor rodando' });
+  res.json({ status: 'ok', message: 'Servidor rodando', timestamp: new Date().toISOString() });
 });
 
 // Rota raiz com documentação
@@ -52,6 +180,12 @@ app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
     version: '1.0.0',
+    security: {
+      rateLimit: 'Ativo',
+      helmet: 'Ativo',
+      sanitization: 'Ativo',
+      xss: 'Ativo'
+    },
     endpoints: {
       auth: {
         registrar: 'POST /api/auth/registrar',
@@ -101,7 +235,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Middleware de erro 404
+// ===========================================
+// MIDDLEWARE DE ERRO 404
+// ===========================================
 app.use((req, res) => {
   res.status(404).json({
     error: 'Rota não encontrada',
@@ -119,9 +255,22 @@ app.use((req, res) => {
   });
 });
 
-// Middleware de erro global
+// ===========================================
+// MIDDLEWARE DE ERRO GLOBAL
+// ===========================================
 app.use((err, req, res, next) => {
   console.error('❌ Erro:', err.stack);
+
+  // Timeout error
+  if (err.timeout) {
+    return res.status(503).json({ error: 'Tempo limite da requisição excedido' });
+  }
+
+  // Rate limit error
+  if (err.code === 'ERR_RATE_LIMIT') {
+    return res.status(429).json({ error: 'Muitas requisições. Tente novamente mais tarde.' });
+  }
+
   res.status(500).json({
     error: 'Erro interno do servidor',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
@@ -133,6 +282,7 @@ app.listen(PORT, () => {
   🚀 Servidor rodando na porta ${PORT}
   📝 Ambiente: ${process.env.NODE_ENV || 'development'}
   🔗 URL: http://localhost:${PORT}
+  🔒 Segurança: Helmet, RateLimit, Sanitize, XSS
   `);
 });
 
