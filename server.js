@@ -2,8 +2,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
-const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 const compression = require('compression');
 const timeout = require('connect-timeout');
 const rateLimit = require('express-rate-limit');
@@ -54,8 +52,8 @@ app.use((req, res, next) => {
 
 // Rate limit geral para API
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 200, // limite de 200 requisições por IP
+  windowMs: 15 * 60 * 1000,
+  max: 200,
   message: { success: false, error: 'Muitas requisições. Tente novamente mais tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -63,30 +61,30 @@ const globalLimiter = rateLimit({
 
 // Rate limit específico para login (mais restrito)
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // apenas 5 tentativas por IP
+  windowMs: 15 * 60 * 1000,
+  max: 5,
   skipSuccessfulRequests: true,
   message: { success: false, error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
 });
 
 // Rate limit para registro
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 3, // apenas 3 registros por IP
+  windowMs: 60 * 60 * 1000,
+  max: 3,
   message: { success: false, error: 'Muitas tentativas de registro. Tente novamente em 1 hora.' },
 });
 
 // Rate limit para recuperação de senha
 const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 3, // apenas 3 solicitações por IP
+  windowMs: 60 * 60 * 1000,
+  max: 3,
   message: { success: false, error: 'Muitas solicitações. Tente novamente em 1 hora.' },
 });
 
 // Rate limit para webhook (mais generoso)
 const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 30, // 30 requisições por minuto (webhook pode enviar várias)
+  windowMs: 1 * 60 * 1000,
+  max: 30,
   skip: (req) => {
     const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',') : [];
     return trustedIps.includes(req.ip);
@@ -94,20 +92,10 @@ const webhookLimiter = rateLimit({
 });
 
 // ===========================================
-// SANITIZAÇÃO (CORRIGIDA)
+// MIDDLEWARE PADRÃO
 // ===========================================
 
-// 5. MongoSanitize - Previne NoSQL injection (configuração corrigida)
-app.use(mongoSanitize({
-  replaceWith: '_',
-  onSanitize: ({ req, key }) => {
-    console.warn(`⚠️ [Security] Tentativa de NoSQL injection detectada no campo: ${key}`);
-  }
-}));
-
-// 6. XSS-Clean - Previne cross-site scripting
-app.use(xss());
-
+// CORS
 const allowedOrigins = [
   'https://giropremiados.com.br',
   'https://www.giropremiados.com.br',
@@ -115,12 +103,9 @@ const allowedOrigins = [
   'http://localhost:5001'
 ];
 
-// Configuração CORS completa
 app.use(cors({
   origin: function (origin, callback) {
-    // Permitir requisições sem origin (como mobile apps ou Postman)
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -132,12 +117,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
-
-// Responder preflight requests (OPTIONS)
-app.options('*', cors());
-
-// Adicionar middleware para OPTIONS (preflight)
-app.options('*', cors());
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -191,9 +170,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     security: {
       rateLimit: 'Ativo',
-      helmet: 'Ativo',
-      sanitization: 'Ativo',
-      xss: 'Ativo'
+      helmet: 'Ativo'
     },
     endpoints: {
       auth: {
@@ -289,7 +266,7 @@ app.listen(PORT, () => {
   🚀 Servidor rodando na porta ${PORT}
   📝 Ambiente: ${process.env.NODE_ENV || 'development'}
   🔗 URL: http://localhost:${PORT}
-  🔒 Segurança: Helmet, RateLimit, Sanitize, XSS
+  🔒 Segurança: Helmet, RateLimit
   `);
 });
 
