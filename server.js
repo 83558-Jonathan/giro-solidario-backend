@@ -108,18 +108,14 @@ app.use(mongoSanitize({
 // 6. XSS-Clean - Previne cross-site scripting
 app.use(xss());
 
-// ===========================================
-// CORS CONFIGURAÇÃO CORRIGIDA
-// ===========================================
-
 const allowedOrigins = [
   'https://giropremiados.com.br',
   'https://www.giropremiados.com.br',
   'http://localhost:3000',
-  'http://localhost:5001',
-  'https://api.giropremiados.com.br'
+  'http://localhost:5001'
 ];
 
+// Configuração CORS completa
 app.use(cors({
   origin: function (origin, callback) {
     // Permitir requisições sem origin (como mobile apps ou Postman)
@@ -136,6 +132,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
+
+// Responder preflight requests (OPTIONS)
+app.options('*', cors());
 
 // Adicionar middleware para OPTIONS (preflight)
 app.options('*', cors());
