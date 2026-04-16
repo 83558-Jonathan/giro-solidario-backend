@@ -212,9 +212,10 @@ exports.registrar = async (req, res) => {
               mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
             }
           }
-          // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO
+          // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO e marca como aguardando
           else if (!temEstrutura) {
             console.log(`🟡 Adicionando ${usuario.nome} como AMARELO na rodada existente ${rodadaDoIndicador.nome}`);
+            console.log(`   ⏳ Usuário será marcado como AGUARDANDO vaga de vermelho`);
 
             try {
               await RodadaService.adicionarParticipanteAmarelo(
@@ -223,12 +224,16 @@ exports.registrar = async (req, res) => {
                 indicador._id.toString()
               );
 
+              // MARCAR USUÁRIO COMO AGUARDANDO VERMELHO
+              usuario.aguardandoVermelho = true;
+              await usuario.save();
+
               rodadaAdicionada = rodadaDoIndicador.nome;
               corAdicionado = 'amarelo';
               rodadaIdAdicionada = rodadaDoIndicador._id;
 
-              console.log(`✅ Usuário ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`);
-              mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}`;
+              console.log(`✅ Usuário ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome} (aguardando vaga de vermelho)`);
+              mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}. Você será convertido para VERMELHO quando surgir uma vaga.`;
 
             } catch (error) {
               console.error('❌ Erro ao adicionar como amarelo:', error);
@@ -333,6 +338,13 @@ exports.registrar = async (req, res) => {
           rodadaIdAdicionada = rodada._id;
           mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${rodada.nome}`;
           console.log(`✅ [SEM CONVITE] Usuário ${usuario.nome} adicionado à rodada existente como ${tipo.toUpperCase()}`);
+
+          // Se foi adicionado como AMARELO, marcar como aguardando vaga de vermelho
+          if (tipo === 'amarelo') {
+            usuario.aguardandoVermelho = true;
+            await usuario.save();
+            console.log(`   ⏳ Usuário marcado como AGUARDANDO vaga de vermelho`);
+          }
         } catch (error) {
           console.error('❌ [SEM CONVITE] Erro ao adicionar usuário à rodada:', error);
 
@@ -384,6 +396,7 @@ exports.registrar = async (req, res) => {
     console.log(`   Usuário: ${usuario.nome}`);
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`);
     console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`);
+    console.log(`   Aguardando vermelho: ${usuario.aguardandoVermelho || false}`);
     console.log(`${'='.repeat(60)}\n`);
 
     res.status(201).json(response);

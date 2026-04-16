@@ -16,6 +16,8 @@ const userSchema = new mongoose.Schema({
   meusIndicados: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   totalIndicacoes: { type: Number, default: 0 },
   indicacoesConfirmadas: { type: Number, default: 0 },
+  // Campo para marcar usuários que estão aguardando vaga de vermelho
+  aguardandoVermelho: { type: Boolean, default: false },
 
   // Campos para recuperacao de senha
   resetPasswordToken: { type: String },

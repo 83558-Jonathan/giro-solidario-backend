@@ -897,6 +897,70 @@ class RodadaService {
         rodada.rodadasGeradas = [novaRodada1._id, novaRodada2._id];
 
         console.log(`✅ [DEBUG] Rodadas geradas com sucesso!`);
+
+        // ===========================================
+        // 🔥 NOVA FUNCIONALIDADE: ALOCAR USUÁRIOS AGUARDANDO COMO VERMELHOS
+        // ===========================================
+        console.log(`\n🟡 [ALOCACAO] Buscando usuários aguardando vaga de vermelho...`);
+
+        // Buscar usuários que estão aguardando vaga de vermelho (mais antigos primeiro)
+        const usuariosAguardando = await User.find({ aguardandoVermelho: true }).sort({ createdAt: 1 });
+
+        if (usuariosAguardando.length > 0) {
+          console.log(`   📋 Encontrados ${usuariosAguardando.length} usuário(s) aguardando`);
+
+          let index = 0;
+          const vagasPorRodada = 8;
+          const novasRodadas = [novaRodada1, novaRodada2];
+
+          for (const rodadaNova of novasRodadas) {
+            for (let vaga = 0; vaga < vagasPorRodada && index < usuariosAguardando.length; vaga++) {
+              const usuario = usuariosAguardando[index];
+
+              console.log(`\n   🔄 Processando usuário ${index + 1}/${usuariosAguardando.length}: ${usuario.nome}`);
+
+              // 1. Remover o usuário da rodada amarela onde ele está
+              const rodadaAmarela = await Rodada.findOne({
+                'participantes.usuario': usuario._id,
+                'participantes.cor': 'amarelo',
+                status: 'aguardando'
+              });
+
+              if (rodadaAmarela) {
+                const participanteAmarelo = rodadaAmarela.participantes.find(p => p.usuario.toString() === usuario._id.toString());
+                if (participanteAmarelo) {
+                  rodadaAmarela.participantes = rodadaAmarela.participantes.filter(p => p.usuario.toString() !== usuario._id.toString());
+                  await rodadaAmarela.save();
+                  console.log(`      🟡 Removido da rodada amarela ${rodadaAmarela.nome}`);
+                }
+              }
+
+              // 2. Adicionar o usuário como VERMELHO na nova rodada
+              await this.adicionarParticipanteVermelho(rodadaNova._id.toString(), usuario._id.toString(), null);
+
+              // 3. Remover a flag de aguardando
+              usuario.aguardandoVermelho = false;
+              await usuario.save();
+
+              console.log(`      🔴 Alocado como VERMELHO na rodada ${rodadaNova.nome}`);
+
+              index++;
+            }
+
+            if (index >= usuariosAguardando.length) break;
+          }
+
+          const totalAlocados = Math.min(usuariosAguardando.length, 16); // máximo 16 vagas (8 por rodada)
+          const restantes = usuariosAguardando.length - totalAlocados;
+
+          console.log(`\n✅ [ALOCACAO] ${totalAlocados} usuário(s) alocados como VERMELHOS`);
+          if (restantes > 0) {
+            console.log(`   ⏳ ${restantes} usuário(s) ainda aguardando para próximas rodadas`);
+          }
+        } else {
+          console.log(`   ✅ Nenhum usuário aguardando vaga de vermelho`);
+        }
+
       } else {
         console.log(`⚠️ [DEBUG] Número de verdes insuficiente: ${novosVerdes.length}. Esperado: 2`);
       }
