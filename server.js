@@ -88,18 +88,22 @@ const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
   max: 30, // 30 requisições por minuto (webhook pode enviar várias)
   skip: (req) => {
-    // Pular rate limit para IPs confiáveis (se necessário)
     const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',') : [];
     return trustedIps.includes(req.ip);
   }
 });
 
 // ===========================================
-// SANITIZAÇÃO
+// SANITIZAÇÃO (CORRIGIDA)
 // ===========================================
 
-// 5. MongoSanitize - Previne NoSQL injection
-app.use(mongoSanitize());
+// 5. MongoSanitize - Previne NoSQL injection (configuração corrigida)
+app.use(mongoSanitize({
+  replaceWith: '_',
+  onSanitize: ({ req, key }) => {
+    console.warn(`⚠️ [Security] Tentativa de NoSQL injection detectada no campo: ${key}`);
+  }
+}));
 
 // 6. XSS-Clean - Previne cross-site scripting
 app.use(xss());
@@ -127,30 +131,27 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json({ limit: '10mb' })); // Limitar tamanho do JSON
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ===========================================
 // APLICAR RATE LIMITERS NAS ROTAS
 // ===========================================
 
-// Aplicar rate limit global antes das rotas
 app.use('/api/', globalLimiter);
-
-// Aplicar rate limits específicos
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/registrar', registerLimiter);
 app.use('/api/auth/forgot-password', forgotPasswordLimiter);
 app.use('/api/webhook/', webhookLimiter);
 
 // ===========================================
-// CONEXÃO MONGODB (COM OPÇÕES DE SEGURANÇA)
+// CONEXÃO MONGODB
 // ===========================================
 
 mongoose.connect(process.env.MONGODB_URI, {
   serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 45000,
-  family: 4, // IPv4
+  family: 4,
   maxPoolSize: 10,
   minPoolSize: 2,
 })
@@ -175,7 +176,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Servidor rodando', timestamp: new Date().toISOString() });
 });
 
-// Rota raiz com documentação
+// Rota raiz
 app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
@@ -261,12 +262,10 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('❌ Erro:', err.stack);
 
-  // Timeout error
   if (err.timeout) {
     return res.status(503).json({ error: 'Tempo limite da requisição excedido' });
   }
 
-  // Rate limit error
   if (err.code === 'ERR_RATE_LIMIT') {
     return res.status(429).json({ error: 'Muitas requisições. Tente novamente mais tarde.' });
   }
