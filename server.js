@@ -109,27 +109,36 @@ app.use(mongoSanitize({
 app.use(xss());
 
 // ===========================================
-// MIDDLEWARE PADRÃO
+// CORS CONFIGURAÇÃO CORRIGIDA
 // ===========================================
 
-// CORS
 const allowedOrigins = [
   'https://giropremiados.com.br',
   'https://www.giropremiados.com.br',
   'http://localhost:3000',
-  'http://localhost:5001'
+  'http://localhost:5001',
+  'https://api.giropremiados.com.br'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Permitir requisições sem origin (como mobile apps ou Postman)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log(`❌ CORS bloqueado para origem: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
+
+// Adicionar middleware para OPTIONS (preflight)
+app.options('*', cors());
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
