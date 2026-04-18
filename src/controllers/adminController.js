@@ -1,4 +1,3 @@
-// controllers/adminController.js
 const User = require('../models/User');
 const Rodada = require('../models/Rodada');
 const Transacao = require('../models/Transacao');
@@ -76,7 +75,6 @@ exports.aprovarSaque = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Solicitação já foi processada' });
         }
 
-        // Marcar como aprovado
         solicitacao.status = 'aprovado';
         solicitacao.dataAprovacao = new Date();
         solicitacao.aprovadoPor = adminId;
