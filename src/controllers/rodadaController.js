@@ -1,4 +1,6 @@
 const RodadaService = require('../services/rodadaService');
+const User = require('../models/User');
+const SolicitacaoSaque = require('../models/SolicitacaoSaque');
 const mongoose = require('mongoose');
 
 // CRIAR nova rodada
@@ -237,8 +239,6 @@ exports.sacarPremio = async (req, res) => {
     if (!usuario) {
       return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
     }
-
-    const SolicitacaoSaque = require('../models/SolicitacaoSaque');
 
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,

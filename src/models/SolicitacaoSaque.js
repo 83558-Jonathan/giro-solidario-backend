@@ -37,7 +37,6 @@ const solicitacaoSaqueSchema = new mongoose.Schema({
     },
     dataAprovacao: Date,
     dataPagamento: Date,
-    comprovante: String,
     observacao: String,
     aprovadoPor: {
         type: mongoose.Schema.Types.ObjectId,
