@@ -11,6 +11,24 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // ===========================================
+// TRUST PROXY (para obter IP real do cliente via Cloudflare)
+// ===========================================
+app.set('trust proxy', true);
+
+// ===========================================
+// FUNÇÃO AUXILIAR PARA OBTER IP REAL
+// ===========================================
+const getRealIp = (req) => {
+  // Pega o IP real do header X-Forwarded-For (Cloudflare) ou fallback para req.ip
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    // Pega o primeiro IP da lista (IP real do cliente)
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || req.connection.remoteAddress;
+};
+
+// ===========================================
 // CONFIGURAÇÕES DE SEGURANÇA
 // ===========================================
 
@@ -46,48 +64,59 @@ app.use((req, res, next) => {
   next();
 });
 
+// 5. Middleware para log do IP (debug - opcional, pode remover depois)
+app.use((req, res, next) => {
+  console.log(`🌐 [${req.method}] ${req.path} - IP Real: ${getRealIp(req)}`);
+  next();
+});
+
 // ===========================================
-// RATE LIMITING
+// RATE LIMITING (COM IP REAL)
 // ===========================================
 
 // Rate limit geral para API
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 300, // 300 requisições por minuto por IP
+  keyGenerator: getRealIp,
   message: { success: false, error: 'Muitas requisições. Tente novamente mais tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Rate limit específico para login (mais restrito)
+// Rate limit específico para login (menos restrito)
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
+  windowMs: 5 * 60 * 1000, // 5 minutos
+  max: 20, // 20 tentativas por IP em 5 minutos
+  keyGenerator: getRealIp,
   skipSuccessfulRequests: true,
-  message: { success: false, error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
+  message: { success: false, error: 'Muitas tentativas de login. Tente novamente em 5 minutos.' },
 });
 
 // Rate limit para registro
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 3,
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 20, // 20 registros por IP por hora
+  keyGenerator: getRealIp,
   message: { success: false, error: 'Muitas tentativas de registro. Tente novamente em 1 hora.' },
 });
 
 // Rate limit para recuperação de senha
 const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 3,
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 10, // 10 solicitações por IP por hora
+  keyGenerator: getRealIp,
   message: { success: false, error: 'Muitas solicitações. Tente novamente em 1 hora.' },
 });
 
-// Rate limit para webhook (mais generoso)
+// Rate limit para webhook (mais generoso, IPs confiáveis podem pular)
 const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 30,
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 60, // 60 requisições por minuto
+  keyGenerator: getRealIp,
   skip: (req) => {
     const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',') : [];
-    return trustedIps.includes(req.ip);
+    return trustedIps.includes(getRealIp(req));
   }
 });
 
@@ -109,7 +138,7 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log(`❌ CORS bloqueado para origem: ${origin}`);
+      console.log(`❌ CORS bloqueado para origem: ${origin} - IP: ${getRealIp(req)}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -169,7 +198,7 @@ app.get('/', (req, res) => {
     message: 'API Giro Premiado',
     version: '1.0.0',
     security: {
-      rateLimit: 'Ativo',
+      rateLimit: 'Ativo (por IP real)',
       helmet: 'Ativo'
     },
     endpoints: {
@@ -266,7 +295,7 @@ app.listen(PORT, () => {
   🚀 Servidor rodando na porta ${PORT}
   📝 Ambiente: ${process.env.NODE_ENV || 'development'}
   🔗 URL: http://localhost:${PORT}
-  🔒 Segurança: Helmet, RateLimit
+  🔒 Segurança: Helmet, RateLimit (por IP real)
   `);
 });
 
