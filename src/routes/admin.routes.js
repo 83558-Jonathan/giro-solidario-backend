@@ -1,8 +1,8 @@
-// routes/admin.routes.js
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
+const User = require('../models/User');
 
 // Verificar se é admin
 const isAdmin = async (req, res, next) => {
