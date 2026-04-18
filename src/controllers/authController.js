@@ -411,7 +411,7 @@ exports.registrar = async (req, res) => {
 };
 
 // ===========================================
-// LOGIN (mantido igual)
+// LOGIN (CORRIGIDO - ADICIONADO ROLE)
 // ===========================================
 exports.login = async (req, res) => {
   try {
@@ -458,7 +458,8 @@ exports.login = async (req, res) => {
         id: usuario._id,
         nome: usuario.nome,
         email: usuario.email,
-        codigoConvite: usuario.codigoConvite
+        codigoConvite: usuario.codigoConvite,
+        role: usuario.role 
       }
     });
 
