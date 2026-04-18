@@ -199,3 +199,83 @@ exports.verificarStatusUsuario = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// ===========================================
+// SACAR PRÊMIO DO VERDE
+// ===========================================
+exports.sacarPremio = async (req, res) => {
+  try {
+    const { rodadaId } = req.params;
+    const usuarioId = req.usuarioId;
+
+    if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+      return res.status(400).json({ success: false, error: 'ID da rodada inválido' });
+    }
+
+    const db = mongoose.connection.db;
+    const rodada = await db.collection('rodadas').findOne({
+      _id: new mongoose.Types.ObjectId(rodadaId)
+    });
+
+    if (!rodada) {
+      return res.status(404).json({ success: false, error: 'Rodada não encontrada' });
+    }
+
+    if (rodada.status !== 'concluida') {
+      return res.status(400).json({ success: false, error: 'Esta rodada ainda não foi concluída' });
+    }
+
+    if (rodada.verde?.toString() !== usuarioId) {
+      return res.status(403).json({ success: false, error: 'Apenas o VERDE pode solicitar o prêmio' });
+    }
+
+    if (rodada.premioVerdePago === true) {
+      return res.status(400).json({ success: false, error: 'Prêmio já foi solicitado anteriormente' });
+    }
+
+    const usuario = await User.findById(usuarioId);
+    if (!usuario) {
+      return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
+    }
+
+    const SolicitacaoSaque = require('../models/SolicitacaoSaque');
+
+    const solicitacao = new SolicitacaoSaque({
+      usuario: usuarioId,
+      rodada: rodadaId,
+      valor: 900,
+      chavePix: usuario.chavePix,
+      tipoChavePix: usuario.tipoChavePix,
+      status: 'pendente',
+      dataSolicitacao: new Date()
+    });
+
+    await solicitacao.save();
+
+    // Marcar que já foi solicitado (evita duplicidade)
+    await db.collection('rodadas').updateOne(
+      { _id: new mongoose.Types.ObjectId(rodadaId) },
+      { $set: { premioVerdePago: true } }
+    );
+
+    console.log(`💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`);
+
+    // Enviar email de notificação para o admin
+    try {
+      const emailController = require('./emailController');
+      await emailController.notificarAdminNovaSolicitacao(usuario, rodada, 900);
+    } catch (emailError) {
+      console.error('❌ Erro ao notificar admin:', emailError);
+    }
+
+    res.json({
+      success: true,
+      message: 'Solicitação de saque enviada! Aguarde a aprovação do administrador.',
+      solicitacaoId: solicitacao._id
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao solicitar saque:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

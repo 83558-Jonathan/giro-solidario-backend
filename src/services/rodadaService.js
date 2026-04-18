@@ -832,12 +832,11 @@ class RodadaService {
       console.log(`   ✅ Concluídos: ${concluidos.length}`);
 
       // PAGAMENTO DO VERDE ANTIGO (R$ 900)
+      // VERDE NÃO RECEBE AUTOMATICAMENTE - Apenas marca que o prêmio está pendente
       if (verdeAtual) {
-        console.log(`💰 [DEBUG] Pagando R$ 900 para verde antigo: ${verdeAtual.usuario}`);
-        await User.findByIdAndUpdate(verdeAtual.usuario, {
-          $inc: { saldo: 900, totalGanho: 900 }
-        });
-        console.log(`✅ [DEBUG] Pagamento realizado com sucesso`);
+        console.log(`💰 [DEBUG] Prêmio de R$ 900 disponível para o verde: ${verdeAtual.usuario}`);
+        console.log(`   ⏳ Aguardando o verde clicar em "Sacar" para receber o prêmio`);
+        // A rodada já foi marcada como concluída, o prêmio será pago via endpoint /sacar-premio
       }
 
       // GERAÇÃO DE NOVAS RODADAS

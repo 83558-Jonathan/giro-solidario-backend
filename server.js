@@ -9,6 +9,7 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+const criarAdmin = require('./src/scripts/seedAdmin');
 
 // ===========================================
 // TRUST PROXY (para obter IP real do cliente via Cloudflare)
@@ -171,7 +172,10 @@ mongoose.connect(process.env.MONGODB_URI, {
   maxPoolSize: 10,
   minPoolSize: 2,
 })
-  .then(() => console.log('✅ MongoDB Conectado'))
+  .then(async () => {
+    console.log('✅ MongoDB Conectado');
+    criarAdmin().catch(err => console.error('Erro ao criar admin:', err));
+  })
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
 // ===========================================
@@ -186,6 +190,7 @@ app.use('/api/indicacoes', require('./src/routes/indicacao.routes'));
 app.use('/api/pix', require('./src/routes/pix.routes'));
 app.use('/api/webhook', require('./src/routes/webhook.routes'));
 app.use('/api/email', require('./src/routes/email.routes'));
+app.use('/api/admin', require('./src/routes/admin.routes'));
 
 // Rota de teste
 app.get('/api/health', (req, res) => {

@@ -24,4 +24,7 @@ router.get('/:rodadaId/mandala', rodadaController.getMandala);
 // INICIAR rodada (forçar início - para testes)
 router.post('/:rodadaId/iniciar', rodadaController.iniciarRodada);
 
+// Sacar prêmio do verde
+router.post('/:rodadaId/sacar-premio', rodadaController.sacarPremio);
+
 module.exports = router;

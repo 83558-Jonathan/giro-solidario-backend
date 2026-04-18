@@ -74,6 +74,11 @@ const rodadaSchema = new mongoose.Schema({
     default: false
   },
 
+  premioVerdePago: {
+    type: Boolean,
+    default: false
+  },
+
   // Histórico de movimentações
   historicoMovimentacoes: [{
     usuario: {
