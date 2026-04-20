@@ -155,13 +155,21 @@ class RodadaService {
       console.log(`   Tem estrutura (verde/pretos/azuis): ${temEstrutura ? 'SIM' : 'NÃO'}`);
       console.log(`   Pode receber vermelho: ${podeReceberVermelho ? 'SIM' : 'NÃO'}`);
 
+      // Caso 1: Rodada não pode receber vermelhos (está em formação)
       if (!podeReceberVermelho) {
         console.log(`\n⚠️ [VERMELHO] Rodada NÃO pode receber vermelhos!`);
         console.log(`   Motivo: ${rodada.status === 'aguardando' && !temEstrutura ? 'Rodada em formação (aguardando completar 15 participantes)' : 'Status inválido'}`);
-        console.log(`   → Será adicionado como AMARELO na rodada ${rodada.nome}\n`);
 
-        // Em vez de lançar erro, chama adicionarParticipanteAmarelo
-        return await this.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
+        // Verificar se a rodada está aguardando (em formação)
+        if (rodada.status === 'aguardando') {
+          console.log(`   → Será adicionado como AMARELO na rodada ${rodada.nome}\n`);
+          return await this.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
+        } else {
+          // Rodada em andamento mas sem estrutura? Não deveria acontecer
+          console.log(`   → Usuário será marcado como AGUARDANDO vaga de vermelho\n`);
+          await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true });
+          return rodada;
+        }
       }
 
       // Verificar se ainda há vagas para vermelhos (máximo 8)
@@ -170,9 +178,23 @@ class RodadaService {
       console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`);
       console.log(`   Vagas disponíveis: ${8 - vermelhosAtuais}`);
 
+      // ✅ CORREÇÃO: Se não há vagas para vermelhos
       if (vermelhosAtuais >= 8) {
-        console.error(`❌ [VERMELHO] Rodada já possui 8 vermelhos`);
-        throw new Error('Esta rodada já possui 8 vermelhos. Aguarde a próxima rodada.');
+        console.log(`⚠️ [VERMELHO] Rodada já possui 8 vermelhos!`);
+
+        // Se a rodada está aguardando (em formação), pode adicionar como amarelo
+        if (rodada.status === 'aguardando') {
+          console.log(`   → Será adicionado como AMARELO na rodada ${rodada.nome}`);
+          const rodadaAmarela = await this.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
+          await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true });
+          return rodadaAmarela;
+        }
+        // Se a rodada está em andamento, apenas marca como aguardando
+        else {
+          console.log(`   → Rodada em andamento sem vagas. Usuário será marcado como AGUARDANDO vaga de vermelho`);
+          await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true });
+          return rodada;
+        }
       }
 
       // Verificar se usuário já está na rodada
