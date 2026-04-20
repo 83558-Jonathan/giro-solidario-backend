@@ -3,7 +3,9 @@ const User = require('../models/User');
 const Transacao = require('../models/Transacao');
 
 // No topo do arquivo, antes da classe RodadaService
+// No topo do arquivo, antes da classe RodadaService
 const pagamentosProcessadosService = new Map(); // Cache para controle de pagamentos processados
+const processandoRodadas = new Map(); // 🔥 NOVO: Cache para evitar processamento duplicado de rodadas
 
 class RodadaService {
 
@@ -757,6 +759,21 @@ class RodadaService {
   // AVANÇAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS
   // ===========================================
   async avancarRodada(rodadaId) {
+    // ✅ PREVENIR PROCESSAMENTO DUPLICADO
+    if (processandoRodadas.has(rodadaId)) {
+      console.log(`⚠️ [avancarRodada] Rodada ${rodadaId} já está sendo processada. Ignorando.`);
+      return null;
+    }
+    processandoRodadas.set(rodadaId, Date.now());
+
+    // Limpar do cache após 30 segundos (fallback)
+    setTimeout(() => {
+      if (processandoRodadas.has(rodadaId)) {
+        processandoRodadas.delete(rodadaId);
+        console.log(`🧹 [avancarRodada] Cache da rodada ${rodadaId} removido (timeout)`);
+      }
+    }, 30 * 1000);
+
     try {
       console.log(`🚀 [DEBUG] INICIANDO avancarRodada para: ${rodadaId}`);
 
@@ -836,7 +853,6 @@ class RodadaService {
       if (verdeAtual) {
         console.log(`💰 [DEBUG] Prêmio de R$ 900 disponível para o verde: ${verdeAtual.usuario}`);
         console.log(`   ⏳ Aguardando o verde clicar em "Sacar" para receber o prêmio`);
-        // A rodada já foi marcada como concluída, o prêmio será pago via endpoint /sacar-premio
       }
 
       // GERAÇÃO DE NOVAS RODADAS
@@ -856,7 +872,6 @@ class RodadaService {
         console.log(`   🔵 Azuis para distribuir: ${azuisIds.length}`);
 
         // Dividir os participantes em dois grupos
-        // Cada nova rodada terá: 1 verde, 2 pretos (metade), 4 azuis (metade)
         const grupo1Pretos = pretosIds.slice(0, 2);
         const grupo2Pretos = pretosIds.slice(2, 4);
         const grupo1Azuis = azuisIds.slice(0, 4);
@@ -874,10 +889,6 @@ class RodadaService {
           rodada._id
         );
         console.log(`✅ [DEBUG] Rodada #${proximoNumero} criada: ${novaRodada1._id}`);
-        console.log(`   🟢 Verde: ${verdesIds[0]}`);
-        console.log(`   ⚫ Pretos: ${grupo1Pretos.length}`);
-        console.log(`   🔵 Azuis: ${grupo1Azuis.length}`);
-        console.log(`   🔴 Vermelhos: 0 (AGUARDANDO NOVOS PARTICIPANTES)`);
 
         console.log(`🔨 [DEBUG] Criando rodada #${proximoNumero + 1}...`);
         const novaRodada2 = await this.criarRodadaAvancada(
@@ -888,21 +899,16 @@ class RodadaService {
           rodada._id
         );
         console.log(`✅ [DEBUG] Rodada #${proximoNumero + 1} criada: ${novaRodada2._id}`);
-        console.log(`   🟢 Verde: ${verdesIds[1]}`);
-        console.log(`   ⚫ Pretos: ${grupo2Pretos.length}`);
-        console.log(`   🔵 Azuis: ${grupo2Azuis.length}`);
-        console.log(`   🔴 Vermelhos: 0 (AGUARDANDO NOVOS PARTICIPANTES)`);
 
         rodada.rodadasGeradas = [novaRodada1._id, novaRodada2._id];
 
         console.log(`✅ [DEBUG] Rodadas geradas com sucesso!`);
 
         // ===========================================
-        // 🔥 NOVA FUNCIONALIDADE: ALOCAR USUÁRIOS AGUARDANDO COMO VERMELHOS
+        // ALOCAR USUÁRIOS AGUARDANDO COMO VERMELHOS
         // ===========================================
         console.log(`\n🟡 [ALOCACAO] Buscando usuários aguardando vaga de vermelho...`);
 
-        // Buscar usuários que estão aguardando vaga de vermelho (mais antigos primeiro)
         const usuariosAguardando = await User.find({ aguardandoVermelho: true }).sort({ createdAt: 1 });
 
         if (usuariosAguardando.length > 0) {
@@ -913,12 +919,28 @@ class RodadaService {
           const novasRodadas = [novaRodada1, novaRodada2];
 
           for (const rodadaNova of novasRodadas) {
-            for (let vaga = 0; vaga < vagasPorRodada && index < usuariosAguardando.length; vaga++) {
+            const vermelhosAtuaisNaRodada = rodadaNova.participantes.filter(p => p.cor === 'vermelho').length;
+            const vagasRestantes = vagasPorRodada - vermelhosAtuaisNaRodada;
+
+            console.log(`\n   📊 Rodada ${rodadaNova.nome}: ${vermelhosAtuaisNaRodada}/8 vermelhos, ${vagasRestantes} vagas`);
+
+            for (let vaga = 0; vaga < vagasRestantes && index < usuariosAguardando.length; vaga++) {
               const usuario = usuariosAguardando[index];
+
+              // ✅ VERIFICAÇÃO CRÍTICA: Usuário JÁ está nesta rodada?
+              const usuarioJaNaRodada = rodadaNova.participantes.some(
+                p => p.usuario.toString() === usuario._id.toString()
+              );
+
+              if (usuarioJaNaRodada) {
+                console.log(`      ⚠️ [ALOCACAO] Usuário ${usuario.nome} JÁ está na rodada ${rodadaNova.nome}. Pulando...`);
+                index++;
+                continue;
+              }
 
               console.log(`\n   🔄 Processando usuário ${index + 1}/${usuariosAguardando.length}: ${usuario.nome}`);
 
-              // 1. Remover o usuário da rodada amarela onde ele está
+              // Remover da rodada amarela
               const rodadaAmarela = await Rodada.findOne({
                 'participantes.usuario': usuario._id,
                 'participantes.cor': 'amarelo',
@@ -926,35 +948,34 @@ class RodadaService {
               });
 
               if (rodadaAmarela) {
-                const participanteAmarelo = rodadaAmarela.participantes.find(p => p.usuario.toString() === usuario._id.toString());
-                if (participanteAmarelo) {
-                  rodadaAmarela.participantes = rodadaAmarela.participantes.filter(p => p.usuario.toString() !== usuario._id.toString());
-                  await rodadaAmarela.save();
-                  console.log(`      🟡 Removido da rodada amarela ${rodadaAmarela.nome}`);
-                }
+                rodadaAmarela.participantes = rodadaAmarela.participantes.filter(
+                  p => p.usuario.toString() !== usuario._id.toString()
+                );
+                await rodadaAmarela.save();
+                console.log(`      🟡 Removido da rodada amarela ${rodadaAmarela.nome}`);
               }
 
-              // 2. Adicionar o usuário como VERMELHO na nova rodada
-              await this.adicionarParticipanteVermelho(rodadaNova._id.toString(), usuario._id.toString(), null);
+              // Adicionar como VERMELHO
+              try {
+                await this.adicionarParticipanteVermelho(rodadaNova._id.toString(), usuario._id.toString(), null);
+                console.log(`      🔴 Alocado como VERMELHO na rodada ${rodadaNova.nome}`);
 
-              // 3. Remover a flag de aguardando
-              usuario.aguardandoVermelho = false;
-              await usuario.save();
+                usuario.aguardandoVermelho = false;
+                await usuario.save();
 
-              console.log(`      🔴 Alocado como VERMELHO na rodada ${rodadaNova.nome}`);
-
-              index++;
+                index++;
+              } catch (error) {
+                console.error(`      ❌ Erro ao alocar ${usuario.nome}:`, error.message);
+                index++;
+              }
             }
 
             if (index >= usuariosAguardando.length) break;
           }
 
-          const totalAlocados = Math.min(usuariosAguardando.length, 16); // máximo 16 vagas (8 por rodada)
-          const restantes = usuariosAguardando.length - totalAlocados;
-
-          console.log(`\n✅ [ALOCACAO] ${totalAlocados} usuário(s) alocados como VERMELHOS`);
-          if (restantes > 0) {
-            console.log(`   ⏳ ${restantes} usuário(s) ainda aguardando para próximas rodadas`);
+          console.log(`\n✅ [ALOCACAO] ${index} usuário(s) alocados como VERMELHOS`);
+          if (usuariosAguardando.length - index > 0) {
+            console.log(`   ⏳ ${usuariosAguardando.length - index} usuário(s) ainda aguardando`);
           }
         } else {
           console.log(`   ✅ Nenhum usuário aguardando vaga de vermelho`);
@@ -968,17 +989,22 @@ class RodadaService {
       rodada.verde = novosVerdes.length > 0 ? novosVerdes[0].usuario : null;
       rodada.pretos = novosPretos.map(p => p.usuario);
       rodada.azuis = novosAzuis.map(p => p.usuario);
-      rodada.vermelhos = []; // Todos os vermelhos foram promovidos para azul
+      rodada.vermelhos = [];
 
       await rodada.save();
       console.log(`✅ [DEBUG] Rodada ${rodada.nome} avançada com sucesso! Novo status: ${rodada.status}`);
       console.log(`📊 [DEBUG] Rodadas geradas: ${rodada.rodadasGeradas.length}`);
 
       return rodada;
+
     } catch (error) {
       console.error('❌ Erro ao avançar rodada:', error);
       console.error('❌ Stack trace:', error.stack);
       throw error;
+    } finally {
+      // ✅ Limpar cache de processamento
+      processandoRodadas.delete(rodadaId);
+      console.log(`🧹 [avancarRodada] Cache da rodada ${rodadaId} removido`);
     }
   }
 

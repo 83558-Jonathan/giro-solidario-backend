@@ -57,7 +57,7 @@ const transacaoSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Índices
+// Índices para otimização de consultas
 transacaoSchema.index({ pagador: 1, status: 1 });
 transacaoSchema.index({ cobrancaId: 1 });
 transacaoSchema.index({ rodada: 1, status: 1 });

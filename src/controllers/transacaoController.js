@@ -129,8 +129,8 @@ exports.confirmarDeposito = async (req, res) => {
 
         console.log(`✅ Pagamento confirmado: ${participante.usuario} - ${rodada.totalDepositosConfirmados}/8`);
 
-        // Após atualizar rodada, verificar se todos pagaram
-        if (vermelsPagos.length === 8) {
+        // ✅ CORRIGIDO: "vermelhosPagos" em vez de "vermelsPagos"
+        if (vermelhosPagos.length === 8) {
           console.log(`🎉 [confirmarDeposito] ÚLTIMO PAGAMENTO! Chamando verificarTodosDepositos...`);
 
           try {
@@ -163,7 +163,7 @@ exports.confirmarDeposito = async (req, res) => {
   }
 };
 
-// Cancelar transação (NOVA FUNÇÃO)
+// Cancelar transação
 exports.cancelarTransacao = async (req, res) => {
   try {
     const { transacaoId } = req.params;
@@ -212,7 +212,7 @@ exports.cancelarTransacao = async (req, res) => {
   }
 };
 
-// Buscar estatísticas de transações (NOVA FUNÇÃO)
+// Buscar estatísticas de transações
 exports.estatisticas = async (req, res) => {
   try {
     const userId = req.usuarioId;

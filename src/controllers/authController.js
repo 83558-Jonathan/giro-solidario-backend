@@ -49,7 +49,30 @@ async function buscarRodadaDisponivelParaNovoUsuario() {
       return { rodada: rodadaEmAndamento, tipo: 'vermelho' };
     }
 
-    // PRIORIDADE 2: Rodada aguardando (em formação) com menos de 15 participantes
+    // PRIORIDADE 2: Rodada aguardando com estrutura (pode receber vermelho)
+    // 🔥 AJUSTADO: Busca rodadas que JÁ TEM verde, pretos e azuis definidos
+    const rodadaAguardandoComEstrutura = await Rodada.findOne({
+      status: 'aguardando',
+      verde: { $exists: true, $ne: null },
+      pretos: { $exists: true, $ne: [] },
+      azuis: { $exists: true, $ne: [] },
+      $expr: {
+        $lt: [
+          { $size: { $filter: { input: '$participantes', as: 'p', cond: { $eq: ['$$p.cor', 'vermelho'] } } } },
+          8
+        ]
+      }
+    }).sort({ createdAt: 1 });
+
+    if (rodadaAguardandoComEstrutura) {
+      const vermelhosAtuais = rodadaAguardandoComEstrutura.participantes.filter(p => p.cor === 'vermelho').length;
+      console.log(`✅ [SEM CONVITE] Rodada com estrutura encontrada: ${rodadaAguardandoComEstrutura.nome}`);
+      console.log(`   Status: aguardando, Vermelhos: ${vermelhosAtuais}/8`);
+      console.log(`   → Usuário será adicionado como VERMELHO`);
+      return { rodada: rodadaAguardandoComEstrutura, tipo: 'vermelho' };
+    }
+
+    // PRIORIDADE 3: Rodada aguardando (em formação) com menos de 15 participantes
     const rodadaAguardando = await Rodada.findOne({
       status: 'aguardando',
       $expr: { $lt: [{ $size: '$participantes' }, 15] }
@@ -70,7 +93,7 @@ async function buscarRodadaDisponivelParaNovoUsuario() {
       };
     }
 
-    // PRIORIDADE 3: Nenhuma rodada disponível - criar nova
+    // PRIORIDADE 4: Nenhuma rodada disponível - criar nova
     console.log(`⚠️ [SEM CONVITE] Nenhuma rodada disponível. Criando nova rodada...`);
     return { rodada: null, tipo: 'nova' };
 
@@ -302,6 +325,13 @@ exports.registrar = async (req, res) => {
         if (rodada) {
           try {
             await adicionarUsuarioRodada(rodada, usuario._id, tipo);
+
+            // Se foi adicionado como AMARELO, marcar como aguardando
+            if (tipo === 'amarelo') {
+              usuario.aguardandoVermelho = true;
+              await usuario.save();
+            }
+
             rodadaAdicionada = rodada.nome;
             corAdicionado = tipo;
             rodadaIdAdicionada = rodada._id;
@@ -459,7 +489,7 @@ exports.login = async (req, res) => {
         nome: usuario.nome,
         email: usuario.email,
         codigoConvite: usuario.codigoConvite,
-        role: usuario.role 
+        role: usuario.role
       }
     });
 

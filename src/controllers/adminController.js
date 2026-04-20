@@ -81,16 +81,20 @@ exports.aprovarSaque = async (req, res) => {
         solicitacao.observacao = observacao || 'Aprovado pelo administrador';
         await solicitacao.save();
 
-        // Creditar saldo do usuário
+        // ✅ MANTER: Creditar saldo do usuário
         await User.findByIdAndUpdate(solicitacao.usuario._id, {
             $inc: { saldo: solicitacao.valor, totalGanho: solicitacao.valor }
         });
 
         console.log(`✅ Saque aprovado: ${solicitacao.usuario.nome} - R$ ${solicitacao.valor}`);
+        console.log(`   Chave PIX: ${solicitacao.usuario.chavePix} (${solicitacao.usuario.tipoChavePix})`);
 
         res.json({
             success: true,
-            message: 'Saque aprovado com sucesso!'
+            message: 'Saque aprovado com sucesso!',
+            chavePix: solicitacao.usuario.chavePix,
+            tipoChavePix: solicitacao.usuario.tipoChavePix,
+            valor: solicitacao.valor
         });
 
     } catch (error) {
@@ -142,20 +146,32 @@ exports.marcarComoPago = async (req, res) => {
         const { solicitacaoId } = req.params;
         const { comprovante } = req.body;
 
-        const solicitacao = await SolicitacaoSaque.findById(solicitacaoId);
+        const solicitacao = await SolicitacaoSaque.findById(solicitacaoId).populate('usuario');
 
         if (!solicitacao) {
             return res.status(404).json({ success: false, error: 'Solicitação não encontrada' });
         }
 
+        // ✅ VERIFICAR se está aprovado antes de marcar como pago
+        if (solicitacao.status !== 'aprovado') {
+            return res.status(400).json({
+                success: false,
+                error: 'Solicitação precisa estar aprovada antes de marcar como paga'
+            });
+        }
+
         solicitacao.status = 'pago';
         solicitacao.dataPagamento = new Date();
-        solicitacao.comprovante = comprovante;
+        if (comprovante) {
+            solicitacao.comprovante = comprovante;
+        }
         await solicitacao.save();
+
+        console.log(`✅ Saque pago: ${solicitacao.usuario.nome} - R$ ${solicitacao.valor}`);
 
         res.json({
             success: true,
-            message: 'Saque marcado como pago'
+            message: 'Saque marcado como pago com sucesso!'
         });
 
     } catch (error) {
@@ -176,6 +192,7 @@ exports.estatisticas = async (req, res) => {
 
         const totalSolicitacoes = await SolicitacaoSaque.countDocuments();
         const solicitacoesPendentes = await SolicitacaoSaque.countDocuments({ status: 'pendente' });
+        const solicitacoesAprovadas = await SolicitacaoSaque.countDocuments({ status: 'aprovado' });
         const totalPago = await SolicitacaoSaque.aggregate([
             { $match: { status: 'pago' } },
             { $group: { _id: null, total: { $sum: '$valor' } } }
@@ -185,6 +202,12 @@ exports.estatisticas = async (req, res) => {
         const valorTotalRecebido = await Transacao.aggregate([
             { $match: { status: 'confirmado' } },
             { $group: { _id: null, total: { $sum: '$valorPago' } } }
+        ]);
+
+        // ✅ ADICIONADO: Total de saques aprovados (aguardando pagamento)
+        const totalAprovadosAguardando = await SolicitacaoSaque.aggregate([
+            { $match: { status: 'aprovado' } },
+            { $group: { _id: null, total: { $sum: '$valor' } } }
         ]);
 
         res.json({
@@ -199,7 +222,9 @@ exports.estatisticas = async (req, res) => {
                 saques: {
                     total: totalSolicitacoes,
                     pendentes: solicitacoesPendentes,
-                    totalPago: totalPago[0]?.total || 0
+                    aprovados: solicitacoesAprovadas,
+                    totalPago: totalPago[0]?.total || 0,
+                    totalAguardandoPagamento: totalAprovadosAguardando[0]?.total || 0
                 },
                 financeiro: {
                     totalRecebido: valorTotalRecebido[0]?.total || 0,
