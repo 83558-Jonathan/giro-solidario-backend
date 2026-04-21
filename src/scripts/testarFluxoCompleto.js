@@ -21,7 +21,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 // Configurações
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/giro-solidario';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/giro-solidario';
 const TEST_PREFIX = 'TESTE_AUTO_';
 const QUANTIDADE_USUARIOS = 15;
 const QUANTIDADE_USUARIOS_ESPERA = 5;
@@ -535,7 +535,7 @@ async function executarTesteCompleto() {
 
     try {
         log('🔌', 'Conectando ao MongoDB...');
-        await mongoose.connect(MONGO_URI);
+        await mongoose.connect(MONGODB_URI);
         log('✅', 'Conectado!');
 
         await limparDadosTeste();
