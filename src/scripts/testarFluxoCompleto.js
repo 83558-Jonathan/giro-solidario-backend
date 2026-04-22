@@ -260,19 +260,22 @@ async function adicionarUsuariosRodada(usuarios) {
 // 5. ADICIONAR USUÁRIOS DE ESPERA
 // ===========================================
 async function adicionarUsuariosEspera(rodada, usuariosEspera) {
-    log('🔄', 'Adicionando usuários de espera à rodada...');
+    log('🔄', 'Adicionando usuários de espera a rodada cheia...');
+    log('⚠️', 'Como a rodada ja tem 15 participantes e 8 vermelhos, eles serao marcados como AGUARDANDO...');
 
     const RodadaService = require('../services/rodadaService');
     const User = require('../models/User');
 
     for (const usuario of usuariosEspera) {
         try {
+            // Tenta adicionar como vermelho (vai falhar porque a rodada esta cheia)
+            // O service deve adicionar como amarelo e marcar aguardandoVermelho = true
             await RodadaService.adicionarParticipanteVermelho(
                 rodada._id.toString(),
                 usuario._id.toString(),
                 usuario.indicadoPor?.toString() || null
             );
-            log('🟡', `${usuario.nome} marcado como AGUARDANDO`);
+            log('🟡', `${usuario.nome} entrou na FILA DE ESPERA`);
             await sleep(200);
         } catch (error) {
             log('⚠️', `${usuario.nome}: ${error.message}`);
@@ -280,7 +283,7 @@ async function adicionarUsuariosEspera(rodada, usuariosEspera) {
     }
 
     const pendentes = await User.countDocuments({ aguardandoVermelho: true });
-    log('⏳', `${pendentes} usuário(s) aguardando vaga de vermelho`);
+    log('⏳', `${pendentes} usuario(s) aguardando vaga de vermelho`);
     return pendentes;
 }
 

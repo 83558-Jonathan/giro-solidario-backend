@@ -20,20 +20,18 @@ app.set('trust proxy', true);
 // FUNÇÃO AUXILIAR PARA OBTER IP REAL
 // ===========================================
 const getRealIp = (req) => {
-  // Pega o IP real do header X-Forwarded-For (Cloudflare) ou fallback para req.ip
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
-    // Pega o primeiro IP da lista (IP real do cliente)
     return forwarded.split(',')[0].trim();
   }
   return req.ip || req.connection.remoteAddress;
 };
 
 // ===========================================
-// CONFIGURAÇÕES DE SEGURANÇA
+// CONFIGURACOES DE SEGURANCA
 // ===========================================
 
-// 1. Helmet - Proteção de headers HTTP
+// 1. Helmet - Protecao de headers HTTP
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -50,7 +48,7 @@ app.use(helmet({
   }
 }));
 
-// 2. Compressão para respostas
+// 2. Compressao para respostas
 app.use(compression());
 
 // 3. Timeout para evitar ataques de slowloris
@@ -65,55 +63,55 @@ app.use((req, res, next) => {
   next();
 });
 
-// 5. Middleware para log do IP (debug - opcional, pode remover depois)
+// 5. Middleware para log do IP (debug - opcional)
 app.use((req, res, next) => {
-  console.log(`🌐 [${req.method}] ${req.path} - IP Real: ${getRealIp(req)}`);
+  console.log(`[${req.method}] ${req.path} - IP: ${getRealIp(req)}`);
   next();
 });
 
 // ===========================================
-// RATE LIMITING (COM IP REAL)
+// RATE LIMITING AUMENTADO PARA DEV (COM IP REAL)
 // ===========================================
 
-// Rate limit geral para API
+// Rate limit geral para API - AUMENTADO para 500
 const globalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 300, // 300 requisições por minuto por IP
+  max: 500, // 500 requisicoes por minuto por IP (antes 300)
   keyGenerator: getRealIp,
-  message: { success: false, error: 'Muitas requisições. Tente novamente mais tarde.' },
+  message: { success: false, error: 'Muitas requisicoes. Tente novamente mais tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Rate limit específico para login (menos restrito)
+// Rate limit especifico para login - AUMENTADO para 100
 const loginLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutos
-  max: 20, // 20 tentativas por IP em 5 minutos
+  max: 100, // 100 tentativas por IP em 5 minutos (antes 20)
   keyGenerator: getRealIp,
   skipSuccessfulRequests: true,
   message: { success: false, error: 'Muitas tentativas de login. Tente novamente em 5 minutos.' },
 });
 
-// Rate limit para registro
+// Rate limit para registro - AUMENTADO para 100
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
-  max: 20, // 20 registros por IP por hora
+  max: 100, // 100 registros por IP por hora (antes 20)
   keyGenerator: getRealIp,
   message: { success: false, error: 'Muitas tentativas de registro. Tente novamente em 1 hora.' },
 });
 
-// Rate limit para recuperação de senha
+// Rate limit para recuperacao de senha - AUMENTADO para 50
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
-  max: 10, // 10 solicitações por IP por hora
+  max: 50, // 50 solicitacoes por IP por hora (antes 10)
   keyGenerator: getRealIp,
-  message: { success: false, error: 'Muitas solicitações. Tente novamente em 1 hora.' },
+  message: { success: false, error: 'Muitas solicitacoes. Tente novamente em 1 hora.' },
 });
 
-// Rate limit para webhook (mais generoso, IPs confiáveis podem pular)
+// Rate limit para webhook - AUMENTADO para 200
 const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 60, // 60 requisições por minuto
+  max: 200, // 200 requisicoes por minuto (antes 60)
   keyGenerator: getRealIp,
   skip: (req) => {
     const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',') : [];
@@ -122,10 +120,10 @@ const webhookLimiter = rateLimit({
 });
 
 // ===========================================
-// MIDDLEWARE PADRÃO
+// MIDDLEWARE PADRAO
 // ===========================================
 
-// CORS
+// CORS - mantido
 const allowedOrigins = [
   'https://giropremiados.com.br',
   'https://www.giropremiados.com.br',
@@ -139,7 +137,7 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log(`❌ CORS bloqueado para origem: ${origin} - IP: ${getRealIp(req)}`);
+      console.log(`CORS bloqueado para origem: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -162,7 +160,7 @@ app.use('/api/auth/forgot-password', forgotPasswordLimiter);
 app.use('/api/webhook/', webhookLimiter);
 
 // ===========================================
-// CONEXÃO MONGODB
+// CONEXAO MONGODB
 // ===========================================
 
 mongoose.connect(process.env.MONGODB_URI, {
@@ -176,7 +174,7 @@ mongoose.connect(process.env.MONGODB_URI, {
     console.log('✅ MongoDB Conectado');
     criarAdmin().catch(err => console.error('Erro ao criar admin:', err));
   })
-  .catch(err => console.error('❌ Erro MongoDB:', err));
+  .catch(err => console.error('Erro MongoDB:', err));
 
 // ===========================================
 // ROTAS
@@ -260,7 +258,7 @@ app.get('/', (req, res) => {
 // ===========================================
 app.use((req, res) => {
   res.status(404).json({
-    error: 'Rota não encontrada',
+    error: 'Rota nao encontrada',
     availableEndpoints: [
       '/',
       '/api/health',
@@ -279,14 +277,14 @@ app.use((req, res) => {
 // MIDDLEWARE DE ERRO GLOBAL
 // ===========================================
 app.use((err, req, res, next) => {
-  console.error('❌ Erro:', err.stack);
+  console.error('Erro:', err.stack);
 
   if (err.timeout) {
-    return res.status(503).json({ error: 'Tempo limite da requisição excedido' });
+    return res.status(503).json({ error: 'Tempo limite da requisicao excedido' });
   }
 
   if (err.code === 'ERR_RATE_LIMIT') {
-    return res.status(429).json({ error: 'Muitas requisições. Tente novamente mais tarde.' });
+    return res.status(429).json({ error: 'Muitas requisicoes. Tente novamente mais tarde.' });
   }
 
   res.status(500).json({
@@ -297,10 +295,9 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`
-  🚀 Servidor rodando na porta ${PORT}
-  📝 Ambiente: ${process.env.NODE_ENV || 'development'}
-  🔗 URL: http://localhost:${PORT}
-  🔒 Segurança: Helmet, RateLimit (por IP real)
+  Servidor rodando na porta ${PORT}
+  Ambiente: ${process.env.NODE_ENV || 'development'}
+  URL: http://localhost:${PORT}
   `);
 });
 
