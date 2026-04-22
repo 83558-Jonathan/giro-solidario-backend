@@ -27,4 +27,7 @@ router.post('/:rodadaId/iniciar', rodadaController.iniciarRodada);
 // Sacar prêmio do verde
 router.post('/:rodadaId/sacar-premio', rodadaController.sacarPremio);
 
+// Adicione esta linha no arquivo de rotas
+router.post('/jogar-novamente', rodadaController.jogarNovamente);
+
 module.exports = router;

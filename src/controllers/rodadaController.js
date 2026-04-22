@@ -203,6 +203,22 @@ exports.verificarStatusUsuario = async (req, res) => {
 };
 
 // ===========================================
+// JOGAR NOVAMENTE (usuario que ganhou quer voltar)
+// ===========================================
+exports.jogarNovamente = async (req, res) => {
+  try {
+    const usuarioId = req.usuarioId;
+
+    const result = await RodadaService.jogarNovamente(usuarioId);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('❌ Erro ao jogar novamente:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+
+// ===========================================
 // SACAR PRÊMIO DO VERDE
 // ===========================================
 exports.sacarPremio = async (req, res) => {
