@@ -9,7 +9,7 @@ exports.criarRodada = async (req, res) => {
     const rodada = await RodadaService.criarRodada(req.usuarioId);
     res.status(201).json({ success: true, data: rodada });
   } catch (error) {
-    console.error('❌ Erro ao criar rodada:', error);
+    console.error('Erro ao criar rodada:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -37,7 +37,7 @@ exports.listarRodadas = async (req, res) => {
 
     res.json({ success: true, count: rodadas.length, data: rodadas });
   } catch (error) {
-    console.error('❌ Erro ao listar rodadas:', error);
+    console.error('Erro ao listar rodadas:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -62,7 +62,7 @@ exports.buscarRodadaPorId = async (req, res) => {
 
     res.json({ success: true, data: rodada });
   } catch (error) {
-    console.error('❌ Erro ao buscar rodada:', error);
+    console.error('Erro ao buscar rodada:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -107,7 +107,7 @@ exports.adicionarParticipante = async (req, res) => {
 
     res.json({ success: true, data: rodadaAtualizada });
   } catch (error) {
-    console.error('❌ Erro ao adicionar participante:', error);
+    console.error('Erro ao adicionar participante:', error);
     res.status(400).json({ success: false, error: error.message });
   }
 };
@@ -119,7 +119,7 @@ exports.iniciarRodada = async (req, res) => {
     const rodada = await RodadaService.iniciarRodada(rodadaId);
     res.json({ success: true, data: rodada });
   } catch (error) {
-    console.error('❌ Erro ao iniciar rodada:', error);
+    console.error('Erro ao iniciar rodada:', error);
     res.status(400).json({ success: false, error: error.message });
   }
 };
@@ -131,7 +131,7 @@ exports.avancarRodada = async (req, res) => {
     const rodada = await RodadaService.avancarRodada(rodadaId);
     res.json({ success: true, data: rodada });
   } catch (error) {
-    console.error('❌ Erro ao avançar rodada:', error);
+    console.error('Erro ao avançar rodada:', error);
     res.status(400).json({ success: false, error: error.message });
   }
 };
@@ -186,7 +186,7 @@ exports.getMandala = async (req, res) => {
 
     res.json({ success: true, data: mandala });
   } catch (error) {
-    console.error('❌ Erro ao carregar mandala:', error);
+    console.error('Erro ao carregar mandala:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -197,7 +197,7 @@ exports.verificarStatusUsuario = async (req, res) => {
     const status = await RodadaService.verificarStatusUsuario(req.usuarioId);
     res.json({ success: true, data: status });
   } catch (error) {
-    console.error('❌ Erro ao verificar status:', error);
+    console.error('Erro ao verificar status:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -213,13 +213,13 @@ exports.jogarNovamente = async (req, res) => {
 
     res.json({ success: true, data: result });
   } catch (error) {
-    console.error('❌ Erro ao jogar novamente:', error);
+    console.error('Erro ao jogar novamente:', error);
     res.status(400).json({ success: false, error: error.message });
   }
 };
 
 // ===========================================
-// SACAR PRÊMIO DO VERDE
+// SACAR PRÊMIO DO VERDE (CORRIGIDO)
 // ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
@@ -243,8 +243,17 @@ exports.sacarPremio = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Esta rodada ainda não foi concluída' });
     }
 
-    if (rodada.verde?.toString() !== usuarioId) {
-      return res.status(403).json({ success: false, error: 'Apenas o VERDE pode solicitar o prêmio' });
+    // ✅ CORREÇÃO: Verificar se o usuário é o VERDE ou se é um participante com cor 'concluido' (ganhou o prêmio)
+    const ehVerde = rodada.verde?.toString() === usuarioId;
+    const participanteConcluido = rodada.participantes?.find(
+      p => p.usuario.toString() === usuarioId && p.cor === 'concluido'
+    );
+
+    if (!ehVerde && !participanteConcluido) {
+      return res.status(403).json({
+        success: false,
+        error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
+      });
     }
 
     if (rodada.premioVerdePago === true) {
@@ -281,7 +290,7 @@ exports.sacarPremio = async (req, res) => {
       const emailController = require('./emailController');
       await emailController.notificarAdminNovaSolicitacao(usuario, rodada, 900);
     } catch (emailError) {
-      console.error('❌ Erro ao notificar admin:', emailError);
+      console.error('Erro ao notificar admin:', emailError);
     }
 
     res.json({
@@ -291,7 +300,7 @@ exports.sacarPremio = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao solicitar saque:', error);
+    console.error('Erro ao solicitar saque:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
