@@ -50,7 +50,6 @@ async function buscarRodadaDisponivelParaNovoUsuario() {
     }
 
     // PRIORIDADE 2: Rodada aguardando com estrutura (pode receber vermelho)
-    // 🔥 AJUSTADO: Busca rodadas que JÁ TEM verde, pretos e azuis definidos
     const rodadaAguardandoComEstrutura = await Rodada.findOne({
       status: 'aguardando',
       verde: { $exists: true, $ne: null },
@@ -93,9 +92,9 @@ async function buscarRodadaDisponivelParaNovoUsuario() {
       };
     }
 
-    // PRIORIDADE 4: Nenhuma rodada disponível - criar nova
-    console.log(`⚠️ [SEM CONVITE] Nenhuma rodada disponível. Criando nova rodada...`);
-    return { rodada: null, tipo: 'nova' };
+    // PRIORIDADE 4: Nenhuma rodada disponível - colocar na FILA DE ESPERA
+    console.log(`⚠️ [SEM CONVITE] Nenhuma rodada disponível. Usuario entrara na FILA DE ESPERA.`);
+    return { rodada: null, tipo: 'fila' };
 
   } catch (error) {
     console.error('❌ [SEM CONVITE] Erro ao buscar rodada:', error);
@@ -326,7 +325,6 @@ exports.registrar = async (req, res) => {
           try {
             await adicionarUsuarioRodada(rodada, usuario._id, tipo);
 
-            // Se foi adicionado como AMARELO, marcar como aguardando
             if (tipo === 'amarelo') {
               usuario.aguardandoVermelho = true;
               await usuario.save();
@@ -341,13 +339,14 @@ exports.registrar = async (req, res) => {
             console.error('❌ Erro ao adicionar usuário à rodada:', error);
             mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
           }
-        } else if (tipo === 'nova') {
-          const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
-          rodadaAdicionada = novaRodada.nome;
-          corAdicionado = 'amarelo';
-          rodadaIdAdicionada = novaRodada._id;
-          mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
-          console.log(`✅ Nova rodada criada para ${usuario.nome}`);
+        } else if (tipo === 'fila') {
+          // ✅ CORRECAO: Nao criar rodada, apenas colocar na fila
+          usuario.aguardandoVermelho = true;
+          await usuario.save();
+          rodadaAdicionada = null;
+          corAdicionado = null;
+          mensagemAuto = `Voce esta na FILA DE ESPERA. Aguarde uma vaga para VERMELHO.`;
+          console.log(`✅ Usuario ${usuario.nome} colocado na fila de espera`);
         }
       }
     }
@@ -369,7 +368,6 @@ exports.registrar = async (req, res) => {
           mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${rodada.nome}`;
           console.log(`✅ [SEM CONVITE] Usuário ${usuario.nome} adicionado à rodada existente como ${tipo.toUpperCase()}`);
 
-          // Se foi adicionado como AMARELO, marcar como aguardando vaga de vermelho
           if (tipo === 'amarelo') {
             usuario.aguardandoVermelho = true;
             await usuario.save();
@@ -377,25 +375,16 @@ exports.registrar = async (req, res) => {
           }
         } catch (error) {
           console.error('❌ [SEM CONVITE] Erro ao adicionar usuário à rodada:', error);
-
-          // Fallback: criar nova rodada
-          console.log(`🆕 [SEM CONVITE] Criando nova rodada como fallback...`);
-          const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
-          rodadaAdicionada = novaRodada.nome;
-          corAdicionado = 'amarelo';
-          rodadaIdAdicionada = novaRodada._id;
-          mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
-          console.log(`✅ [SEM CONVITE] Nova rodada criada para ${usuario.nome}`);
+          mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`;
         }
-      } else if (tipo === 'nova') {
-        // Criar nova rodada para o usuário
-        console.log(`🆕 [SEM CONVITE] Nenhuma rodada disponível. Criando nova rodada...`);
-        const novaRodada = await RodadaService.criarRodada(usuario._id.toString());
-        rodadaAdicionada = novaRodada.nome;
-        corAdicionado = 'amarelo';
-        rodadaIdAdicionada = novaRodada._id;
-        mensagemAuto = `Nova rodada ${novaRodada.nome} criada para você!`;
-        console.log(`✅ [SEM CONVITE] Nova rodada criada para ${usuario.nome}`);
+      } else if (tipo === 'fila') {
+        // ✅ CORRECAO: Nao criar rodada, apenas colocar na fila
+        usuario.aguardandoVermelho = true;
+        await usuario.save();
+        rodadaAdicionada = null;
+        corAdicionado = null;
+        mensagemAuto = `Voce esta na FILA DE ESPERA. Aguarde uma vaga para VERMELHO.`;
+        console.log(`✅ [SEM CONVITE] Usuario ${usuario.nome} colocado na fila de espera`);
       }
     }
 
