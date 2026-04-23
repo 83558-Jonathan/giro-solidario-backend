@@ -68,7 +68,7 @@ exports.buscarRodadaPorId = async (req, res) => {
 };
 
 // ===========================================
-// ADICIONAR PARTICIPANTE - CORRIGIDO
+// ADICIONAR PARTICIPANTE - CORRIGIDO COM SUPORTE A FILA
 // ===========================================
 exports.adicionarParticipante = async (req, res) => {
   try {
@@ -90,22 +90,57 @@ exports.adicionarParticipante = async (req, res) => {
     }
 
     let rodadaAtualizada;
+    let entrouNaFila = false;
 
-    // Verificar status da rodada para decidir qual função chamar
-    if (rodada.status === 'aguardando') {
-      // Rodada ainda não iniciou → adicionar como amarelo
-      rodadaAtualizada = await RodadaService.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
-    } else if (rodada.status === 'em_andamento') {
-      // Rodada já iniciou → adicionar como vermelho (investidor)
-      rodadaAtualizada = await RodadaService.adicionarParticipanteVermelho(rodadaId, usuarioId, indicadorId);
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Rodada já concluída. Não é possível adicionar participantes.'
-      });
+    try {
+      // Verificar status da rodada para decidir qual função chamar
+      if (rodada.status === 'aguardando') {
+        // Rodada ainda não iniciou → adicionar como amarelo
+        rodadaAtualizada = await RodadaService.adicionarParticipanteAmarelo(rodadaId, usuarioId, indicadorId);
+      } else if (rodada.status === 'em_andamento') {
+        // Rodada já iniciou → tentar adicionar como vermelho
+        try {
+          rodadaAtualizada = await RodadaService.adicionarParticipanteVermelho(rodadaId, usuarioId, indicadorId);
+        } catch (error) {
+          // Se não conseguiu adicionar como vermelho, pode ter entrado na fila
+          if (error.message.includes('sem vagas') || error.message.includes('aguardando')) {
+            entrouNaFila = true;
+            // Verificar se o usuário foi marcado como aguardandoVermelho
+            const usuario = await User.findById(usuarioId);
+            if (usuario?.aguardandoVermelho) {
+              return res.json({
+                success: true,
+                message: 'Não há vagas para vermelhos no momento. Você foi adicionado à fila de espera e será avisado quando houver vaga.',
+                data: { aguardandoVermelho: true, fila: true }
+              });
+            }
+          }
+          throw error;
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: 'Rodada já concluída. Não é possível adicionar participantes.'
+        });
+      }
+    } catch (error) {
+      // Tratamento específico para usuário já em outra rodada
+      if (error.message.includes('já participa de uma rodada ativa')) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+          code: 'USUARIO_JA_EM_RODADA'
+        });
+      }
+      throw error;
     }
 
-    res.json({ success: true, data: rodadaAtualizada });
+    res.json({
+      success: true,
+      message: entrouNaFila ? 'Adicionado à fila de espera' : 'Participante adicionado com sucesso',
+      data: rodadaAtualizada,
+      entrouNaFila
+    });
   } catch (error) {
     console.error('Erro ao adicionar participante:', error);
     res.status(400).json({ success: false, error: error.message });

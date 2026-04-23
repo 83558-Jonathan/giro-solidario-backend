@@ -1,18 +1,25 @@
 /**
- * TESTE COMPLETO DO SISTEMA - VALIDA TODAS AS REGRAS DE NEGOCIO
+ * TESTE COMPLETO DO SISTEMA - VALIDA TODAS AS REGRAS
+ * 
+ * Regras validadas:
+ * 1. Novos usuarios NUNCA criam rodadas
+ * 2. Rodadas so nascem da progressao
+ * 3. Usuarios sem vaga entram na FILA DE ESPERA
+ * 4. Na progressao, usuarios da fila sao alocados como VERMELHOS
+ * 5. Progressao de cores: 🔴→🔵→⚫→🟢→✅
+ * 6. Duplicacao: 1 rodada gera 2 novas rodadas
+ * 7. ✅ NENHUM usuario pode estar em multiplas rodadas ATIVAS
  * 
  * Como executar:
  * cd /root/giro-solidario-backend
- * node src/scripts/teste-completo-sistema.js
+ * node scripts/testar-sistema-completo.js
  */
 
+require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-require('dotenv').config();
 
-// ===========================================
-// CONFIGURACOES
-// ===========================================
+// Configuracoes
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/giro-solidario';
 const TEST_PREFIX = 'TESTE_SISTEMA_';
 const QUANTIDADE_USUARIOS = 15;
@@ -40,6 +47,13 @@ function logSeparador() {
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function gerarCpfUnico(prefixo, index, timestamp) {
+    const num = String(index).padStart(3, '0');
+    const time = String(timestamp).slice(-8);
+    const cpf = `${prefixo}${num}${time}`.slice(0, 11);
+    return cpf;
 }
 
 // ===========================================
@@ -73,14 +87,13 @@ async function criarUsuariosPrincipais() {
 
     const User = require('../models/User');
     const usuarios = [];
+    const timestamp = Date.now();
 
     for (let i = 1; i <= QUANTIDADE_USUARIOS; i++) {
         const nome = `${TEST_PREFIX}Principal_${i}`;
         const email = `${TEST_PREFIX}principal${i}@teste.com`;
-        // CPF unico usando i + timestamp
-        const cpf = `${String(i).padStart(3, '0')}${Date.now().toString().slice(-8)}`;
+        const cpf = gerarCpfUnico('P', i, timestamp);
 
-        // Verificar se ja existe
         const existe = await User.findOne({ email });
         if (existe) {
             log('⚠️', `Usuario ${nome} ja existe, pulando...`);
@@ -123,12 +136,12 @@ async function criarUsuariosEspera(usuariosPrincipais) {
     const User = require('../models/User');
     const usuariosEspera = [];
     const indicador = usuariosPrincipais[0];
+    const timestamp = Date.now();
 
     for (let i = 1; i <= QUANTIDADE_USUARIOS_ESPERA; i++) {
         const nome = `${TEST_PREFIX}Espera_${i}`;
         const email = `${TEST_PREFIX}espera${i}@teste.com`;
-        // CPF unico
-        const cpf = `E${String(i).padStart(3, '0')}${Date.now().toString().slice(-7)}`;
+        const cpf = gerarCpfUnico('E', i, timestamp);
 
         const existe = await User.findOne({ email });
         if (existe) {
@@ -190,11 +203,7 @@ async function formarRodadaInicial(usuarios) {
 
     console.log();
     log('🎯', `Rodada ${rodada.nome} completou 15 participantes!`);
-    log('🚀', `Rodada iniciada automaticamente!`);
-    
-    // A rodada ja foi iniciada automaticamente pelo service ao completar 15 participantes
-    // Nao chamar iniciarRodada novamente para evitar erro "Rodada ja esta em_andamento"
-    
+
     return rodada;
 }
 
@@ -257,22 +266,13 @@ async function pagarVermelhos(rodada) {
     const User = require('../models/User');
     const Rodada = require('../models/Rodada');
 
-    // Recarregar a rodada para garantir dados atualizados
     let rodadaAtualizada = await Rodada.findById(rodada._id);
 
     const vermelhos = rodadaAtualizada.participantes.filter(p => p.cor === 'vermelho');
     log('🔴', `${vermelhos.length} vermelhos encontrados`);
 
     if (vermelhos.length === 0) {
-        log('⚠️', 'Nenhum vermelho encontrado! Verificando status da rodada...');
-        log('📌', `Rodada status: ${rodadaAtualizada.status}`);
-
-        // Mostrar cores dos participantes
-        const cores = {};
-        for (const p of rodadaAtualizada.participantes) {
-            cores[p.cor] = (cores[p.cor] || 0) + 1;
-        }
-        log('📌', `Cores: ${JSON.stringify(cores)}`);
+        log('⚠️', 'Nenhum vermelho encontrado!');
         return false;
     }
 
@@ -330,7 +330,41 @@ async function forcarAvancoRodada(rodadaId) {
 }
 
 // ===========================================
-// 9. VERIFICAR RESULTADO
+// 9. VERIFICAR PROGRESSAO DE CORES
+// ===========================================
+async function verificarProgressaoCores(rodadaOriginal, novasRodadas) {
+    console.log(`\n📌 MAPEAMENTO DE PROGRESSAO DE CORES:`);
+    console.log('Participante | Cor Original | Cor Apos Promocao | Rodada Destino');
+    console.log('-'.repeat(70));
+
+    for (const p of rodadaOriginal.participantes) {
+        let corApos = p.cor;
+        let rodadaDestino = rodadaOriginal.nome;
+
+        if (p.cor === 'verde') {
+            corApos = 'concluido';
+            rodadaDestino = 'CONCLUIDO (ganhou R$ 900)';
+        } else {
+            for (const nr of novasRodadas) {
+                const participanteNovo = nr.participantes.find(
+                    np => np.usuario.toString() === p.usuario.toString()
+                );
+                if (participanteNovo) {
+                    corApos = participanteNovo.cor;
+                    rodadaDestino = nr.nome;
+                    break;
+                }
+            }
+        }
+
+        const emojiOriginal = CORES[p.cor]?.emoji || '❓';
+        const emojiApos = CORES[corApos]?.emoji || '❓';
+        console.log(`${emojiOriginal} ${p.usuario.nome || p.usuario} | ${p.cor} | ${emojiApos} ${corApos} | ${rodadaDestino}`);
+    }
+}
+
+// ===========================================
+// 10. VERIFICAR RESULTADO E MULTIPLAS PARTICIPACOES
 // ===========================================
 async function verificarResultado(rodadaOriginal, usuariosEspera) {
     const Rodada = require('../models/Rodada');
@@ -338,15 +372,21 @@ async function verificarResultado(rodadaOriginal, usuariosEspera) {
 
     const novasRodadas = await Rodada.find({ rodadaOrigem: rodadaOriginal._id });
 
+    // Buscar participantes com nome para exibicao
+    const rodadaOriginalComNomes = await Rodada.findById(rodadaOriginal._id).populate('participantes.usuario', 'nome');
+
     logSeparador();
     log('📊', 'RESULTADO APOS PROGRESSAO');
     logSeparador();
 
     console.log(`\n📌 RODADA ORIGINAL: ${rodadaOriginal.nome} (${rodadaOriginal.status.toUpperCase()})`);
+    console.log(`   Participantes mantidos no histórico: ${rodadaOriginal.participantes.length}`);
+    console.log(`   Concluídos (ganhadores): ${rodadaOriginal.participantes.filter(p => p.cor === 'concluido').length}`);
 
     console.log(`\n📌 NOVAS RODADAS CRIADAS: ${novasRodadas.length}`);
     for (const rodada of novasRodadas) {
-        const participantes = rodada.participantes || [];
+        const rodadaComNomes = await Rodada.findById(rodada._id).populate('participantes.usuario', 'nome');
+        const participantes = rodadaComNomes.participantes || [];
         const cores = {
             verde: participantes.filter(p => p.cor === 'verde').length,
             preto: participantes.filter(p => p.cor === 'preto').length,
@@ -366,6 +406,58 @@ async function verificarResultado(rodadaOriginal, usuariosEspera) {
         console.log(`      Cores: ${CORES.verde.emoji}${cores.verde} ${CORES.preto.emoji}${cores.preto} ${CORES.azul.emoji}${cores.azul} ${CORES.vermelho.emoji}${cores.vermelho}`);
     }
 
+    // ===========================================
+    // VERIFICAR PARTICIPACAO MULTIPLA (APENAS RODADAS ATIVAS)
+    // ===========================================
+    console.log(`\n🔍 VERIFICANDO PARTICIPACAO MULTIPLA (apenas rodadas ATIVAS):`);
+
+    // ✅ CORRECAO: Buscar apenas rodadas com status 'aguardando' ou 'em_andamento'
+    const rodadasAtivas = await Rodada.find({
+        status: { $in: ['aguardando', 'em_andamento'] }
+    }).populate('participantes.usuario', 'nome');
+
+    console.log(`   Rodadas ativas encontradas: ${rodadasAtivas.length}`);
+    for (const r of rodadasAtivas) {
+        console.log(`      → ${r.nome} (${r.status})`);
+    }
+
+    const participacaoMap = new Map();
+
+    for (const rodada of rodadasAtivas) {
+        for (const p of rodada.participantes || []) {
+            const userId = p.usuario._id.toString();
+            if (!participacaoMap.has(userId)) {
+                participacaoMap.set(userId, []);
+            }
+            participacaoMap.get(userId).push({
+                rodada: rodada.nome,
+                cor: p.cor,
+                status: rodada.status
+            });
+        }
+    }
+
+    let multiplas = 0;
+    for (const [userId, participacoes] of participacaoMap) {
+        if (participacoes.length > 1) {
+            multiplas++;
+            const usuario = await User.findById(userId);
+            console.log(`   ⚠️ ${usuario?.nome} participa de ${participacoes.length} rodadas ATIVAS:`);
+            for (const p of participacoes) {
+                console.log(`      → ${p.rodada} como ${p.cor.toUpperCase()} (${p.status})`);
+            }
+        }
+    }
+
+    if (multiplas === 0) {
+        console.log(`   ✅ Nenhum usuario em multiplas rodadas ativas!`);
+    } else {
+        console.log(`   ❌ ${multiplas} usuario(s) em multiplas rodadas ativas - VERIFICAR CORRECAO`);
+    }
+
+    // ===========================================
+    // VERIFICAR ALOCACAO DOS USUARIOS DE ESPERA
+    // ===========================================
     console.log(`\n📌 ALOCACAO DOS USUARIOS DE ESPERA:`);
     let alocados = 0;
     for (const usuario of usuariosEspera) {
@@ -382,57 +474,23 @@ async function verificarResultado(rodadaOriginal, usuariosEspera) {
             }
         }
         if (!encontrado) {
-            console.log(`   ${CORES.amarelo.emoji} ${usuario.nome} -> AINDA NA FILA`);
+            const aindaAguardando = await User.findById(usuario._id);
+            console.log(`   ${CORES.amarelo.emoji} ${usuario.nome} -> AINDA NA FILA (aguardandoVermelho: ${aindaAguardando?.aguardandoVermelho})`);
         }
     }
 
-    return { novasRodadas, alocados };
-}
+    // ===========================================
+    // VERIFICAR PROGRESSAO DE CORES
+    // ===========================================
+    await verificarProgressaoCores(rodadaOriginalComNomes, novasRodadas);
 
-// ===========================================
-// 10. VALIDAR PROGRESSAO
-// ===========================================
-async function validarProgressaoCores(rodadaOriginal, novasRodadas) {
-    const User = require('../models/User');
-    const participantesOriginais = rodadaOriginal.participantes || [];
-
-    console.log(`\n📌 MAPEAMENTO DE PROGRESSAO DE CORES:`);
-    console.log('Participante | Cor Original | Nova Cor | Rodada Destino');
-    console.log('-'.repeat(60));
-
-    for (const p of participantesOriginais) {
-        const usuario = await User.findById(p.usuario);
-        const corOriginal = p.cor;
-        let novaCor = '❓';
-        let rodadaDestino = '❓';
-
-        for (const nr of novasRodadas) {
-            const participanteNovo = nr.participantes.find(
-                np => np.usuario.toString() === p.usuario.toString()
-            );
-            if (participanteNovo) {
-                novaCor = participanteNovo.cor;
-                rodadaDestino = nr.nome;
-                break;
-            }
-        }
-
-        if (novaCor === '❓' && p.cor === 'verde') {
-            novaCor = 'concluido';
-            rodadaDestino = 'SAIU (ganhou R$ 900)';
-        }
-
-        const emojiOriginal = CORES[corOriginal]?.emoji || '❓';
-        const emojiNova = CORES[novaCor]?.emoji || '❓';
-
-        console.log(`${emojiOriginal} ${usuario?.nome || p.usuario} | ${corOriginal} | ${emojiNova} ${novaCor} | ${rodadaDestino}`);
-    }
+    return { novasRodadas, alocados, multiplas };
 }
 
 // ===========================================
 // 11. RELATORIO FINAL
 // ===========================================
-async function relatorioFinal(usuariosEspera, alocados) {
+async function relatorioFinal(usuariosEspera, alocados, multiplas) {
     const User = require('../models/User');
     const Rodada = require('../models/Rodada');
     const Transacao = require('../models/Transacao');
@@ -459,18 +517,21 @@ async function relatorioFinal(usuariosEspera, alocados) {
     console.log('\n🎯 VALIDACOES:');
 
     const validacao1 = rodadasAguardando >= 2;
-    console.log(`   ${validacao1 ? '✅' : '❌'} 1. Rodadas duplicadas: ${rodadasAguardando} novas rodadas`);
+    console.log(`   ${validacao1 ? '✅' : '❌'} 1. Duplicacao (1 rodada gerou ${rodadasAguardando} novas): ${validacao1 ? 'OK' : 'FALHOU'}`);
 
     const validacao2 = alocados === usuariosEspera.length;
-    console.log(`   ${validacao2 ? '✅' : '❌'} 2. Usuarios alocados: ${alocados}/${usuariosEspera.length}`);
+    console.log(`   ${validacao2 ? '✅' : '❌'} 2. Alocacao fila de espera (${alocados}/${usuariosEspera.length}): ${validacao2 ? 'OK' : 'FALHOU'}`);
 
     const validacao3 = pendentes === 0;
-    console.log(`   ${validacao3 ? '✅' : '❌'} 3. Fila de espera vazia: ${pendentes} pendentes`);
+    console.log(`   ${validacao3 ? '✅' : '❌'} 3. Fila de espera vazia (${pendentes} pendentes): ${validacao3 ? 'OK' : 'FALHOU'}`);
 
     const validacao4 = rodadasConcluidas >= 1;
-    console.log(`   ${validacao4 ? '✅' : '❌'} 4. Rodada concluida: ${rodadasConcluidas}`);
+    console.log(`   ${validacao4 ? '✅' : '❌'} 4. Rodada concluida (${rodadasConcluidas}): ${validacao4 ? 'OK' : 'FALHOU'}`);
 
-    const testePassou = validacao1 && validacao2 && validacao3 && validacao4;
+    const validacao5 = multiplas === 0;
+    console.log(`   ${validacao5 ? '✅' : '❌'} 5. Participacao multipla (${multiplas} usuarios): ${validacao5 ? 'OK' : 'FALHOU'}`);
+
+    const testePassou = validacao1 && validacao2 && validacao3 && validacao4 && validacao5;
 
     console.log('\n🎯 RESULTADO FINAL:');
     if (testePassou) {
@@ -480,6 +541,7 @@ async function relatorioFinal(usuariosEspera, alocados) {
         console.log('   ✅ Fila de espera funcionando');
         console.log('   ✅ Usuarios pendentes alocados como VERMELHOS');
         console.log('   ✅ Progressao de cores OK');
+        console.log('   ✅ Nenhum usuario em multiplas rodadas ativas');
     } else {
         console.log('   ❌ TESTE FALHOU! Verifique os logs acima.');
     }
@@ -522,13 +584,9 @@ async function executarTesteCompleto() {
         const Rodada = require('../models/Rodada');
         rodada = await Rodada.findById(rodada._id);
 
-        const { novasRodadas, alocados } = await verificarResultado(rodada, usuariosEspera);
+        const { novasRodadas, alocados, multiplas } = await verificarResultado(rodada, usuariosEspera);
 
-        if (novasRodadas.length > 0) {
-            await validarProgressaoCores(rodada, novasRodadas);
-        }
-
-        await relatorioFinal(usuariosEspera, alocados);
+        await relatorioFinal(usuariosEspera, alocados, multiplas);
 
         log('🎉', 'TESTE CONCLUIDO COM SUCESSO!');
 
