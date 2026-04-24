@@ -1,0 +1,164 @@
+[
+  {
+    "nome": "CadastroSemConvite",
+    "email": "cadastro_sem_convite_1777059949478@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86d412c974d0eed30fd",
+    "codigoConvite": "CONVITE-MTAW4SZE",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "ConvidadoViaLink",
+    "email": "convidado_1777059949575@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86d412c974d0eed3106",
+    "codigoConvite": "CONVITE-RONE8Y83",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "FilaUser_1",
+    "email": "filauser_1_1777059950778@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86e412c974d0eed342e",
+    "codigoConvite": "CONVITE-RF5WZ8PI",
+    "naFila": true,
+    "posicaoFila": 1
+  },
+  {
+    "nome": "FilaUser_2",
+    "email": "filauser_2_1777059950834@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86e412c974d0eed3431",
+    "codigoConvite": "CONVITE-XM9DQC1C",
+    "naFila": true,
+    "posicaoFila": 2
+  },
+  {
+    "nome": "FilaUser_3",
+    "email": "filauser_3_1777059950891@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86e412c974d0eed3434",
+    "codigoConvite": "CONVITE-K2U071K1",
+    "naFila": true,
+    "posicaoFila": 3
+  },
+  {
+    "nome": "FilaUser_4",
+    "email": "filauser_4_1777059950947@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86e412c974d0eed3437",
+    "codigoConvite": "CONVITE-UN42M7VT",
+    "naFila": true,
+    "posicaoFila": 4
+  },
+  {
+    "nome": "FilaUser_5",
+    "email": "filauser_5_1777059951000@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed343a",
+    "codigoConvite": "CONVITE-S9YW5OA5",
+    "naFila": true,
+    "posicaoFila": 5
+  },
+  {
+    "nome": "ExVerde_JogarNovamente",
+    "email": "exverde_1777059951203@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed3495",
+    "codigoConvite": "CONVITE-ID93Y46B",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "GanhadorPremio",
+    "email": "ganhador_1777059951412@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34bb",
+    "codigoConvite": "CONVITE-LBSWMDFG",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidante_1",
+    "email": "convidante_1_1777059951503@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34d4",
+    "codigoConvite": "CONVITE-Z9A1ZB13",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidante_2",
+    "email": "convidante_2_1777059951587@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34dc",
+    "codigoConvite": "CONVITE-YPQ21PE0",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidante_3",
+    "email": "convidante_3_1777059951664@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34e4",
+    "codigoConvite": "CONVITE-KE1I8EKJ",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_1_1",
+    "email": "convidado_Convidante_1_1_1777059951740@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34ec",
+    "codigoConvite": "CONVITE-WUZFVQBW",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_1_2",
+    "email": "convidado_Convidante_1_2_1777059951814@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed34f6",
+    "codigoConvite": "CONVITE-C3BMBLCL",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_2_1",
+    "email": "convidado_Convidante_2_1_1777059951874@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed3501",
+    "codigoConvite": "CONVITE-T93YSWJW",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_2_2",
+    "email": "convidado_Convidante_2_2_1777059951933@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc86f412c974d0eed350b",
+    "codigoConvite": "CONVITE-2FKMI18L",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_3_1",
+    "email": "convidado_Convidante_3_1_1777059951992@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc870412c974d0eed3516",
+    "codigoConvite": "CONVITE-YUA0X9SO",
+    "naFila": false,
+    "posicaoFila": null
+  },
+  {
+    "nome": "Convidado_3_2",
+    "email": "convidado_Convidante_3_2_1777059952052@teste.com",
+    "senha": "Test@123",
+    "id": "69ebc870412c974d0eed3520",
+    "codigoConvite": "CONVITE-31HPLJII",
+    "naFila": false,
+    "posicaoFila": null
+  }
+]

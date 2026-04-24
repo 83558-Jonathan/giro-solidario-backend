@@ -4,6 +4,7 @@ const Transacao = require('../models/Transacao');
 const Rodada = require('../models/Rodada');
 const User = require('../models/User');
 const abacate = require('../config/abacate');
+const RodadaService = require('../services/rodadaService');
 
 // Constantes
 const TAXA_PLATAFORMA = 0.10;
@@ -100,9 +101,9 @@ async function processarPagamentoComControle(transacaoId, source = 'webhook') {
         console.log(`✅ [${source}] Participante ${participante.usuario} marcado como pago`);
         console.log(`📊 [${source}] Progresso: ${vermelhosPagos.length}/${vermelhos.length}`);
 
-        // Verificar se todos pagaram
-        if (vermelhosPagos.length === vermelhos.length && vermelhos.length > 0) {
-            console.log(`🎉 [${source}] TODOS OS ${vermelhos.length} VERMELHOS PAGARAM!`);
+        // Verificar se todos pagaram (8 vermelhos)
+        if (vermelhosPagos.length === vermelhos.length && vermelhos.length === 8) {
+            console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`);
 
             // Atualizar flag da rodada
             if (!rodada.todosDepositaram) {
@@ -110,6 +111,14 @@ async function processarPagamentoComControle(transacaoId, source = 'webhook') {
                 rodada.dataTodosDepositaram = new Date();
                 await rodada.save();
                 console.log(`✅ [${source}] Rodada marcada como "todos depositaram"`);
+            }
+
+            // Chamar o serviço de avanço da rodada
+            try {
+                await RodadaService.avancarRodada(rodada._id);
+                console.log(`✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`);
+            } catch (err) {
+                console.error(`❌ [${source}] Erro ao avançar rodada:`, err);
             }
         }
 

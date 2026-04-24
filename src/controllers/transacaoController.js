@@ -116,6 +116,16 @@ exports.confirmarDeposito = async (req, res) => {
       );
 
       if (participante) {
+        // VERIFICAR SE JÁ ESTÁ PAGO
+        if (participante.depositoConfirmado === true) {
+          console.log(`⚠️ Participante ${participante.usuario} já estava marcado como pago.`);
+          return res.json({
+            success: true,
+            data: transacao,
+            message: 'Depósito já estava confirmado anteriormente.'
+          });
+        }
+
         participante.depositoConfirmado = true;
         participante.dataDeposito = new Date();
         participante.comprovantePix = comprovante;
@@ -129,16 +139,24 @@ exports.confirmarDeposito = async (req, res) => {
 
         console.log(`✅ Pagamento confirmado: ${participante.usuario} - ${rodada.totalDepositosConfirmados}/8`);
 
-        // ✅ CORRIGIDO: "vermelhosPagos" em vez de "vermelsPagos"
-        if (vermelhosPagos.length === 8) {
-          console.log(`🎉 [confirmarDeposito] ÚLTIMO PAGAMENTO! Chamando verificarTodosDepositos...`);
+        // VERIFICAR SE TODOS PAGARAM (8 vermelhos)
+        if (vermelhosPagos.length === vermelhos.length && vermelhos.length === 8) {
+          console.log(`🎉 [confirmarDeposito] TODOS OS 8 VERMELHOS PAGARAM!`);
 
+          // Marcar que todos depositaram
+          if (!rodada.todosDepositaram) {
+            rodada.todosDepositaram = true;
+            rodada.dataTodosDepositaram = new Date();
+            await rodada.save();
+          }
+
+          // Chamar avanço da rodada
           try {
             const RodadaService = require('../services/rodadaService');
-            const result = await RodadaService.verificarTodosDepositos(rodada._id);
-            console.log(`✅ Verificação de depósitos concluída: ${result}`);
+            await RodadaService.avancarRodada(rodada._id);
+            console.log(`✅ Rodada ${rodada.nome} avançada com sucesso!`);
           } catch (err) {
-            console.error('❌ Erro ao verificar depósitos:', err);
+            console.error('❌ Erro ao avançar rodada:', err);
           }
         }
       }

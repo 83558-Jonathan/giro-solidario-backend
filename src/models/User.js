@@ -19,6 +19,10 @@ const userSchema = new mongoose.Schema({
 
   // Campo para marcar usuários que estão aguardando vaga de vermelho
   aguardandoVermelho: { type: Boolean, default: false },
+  
+  // NOVOS CAMPOS PARA FILA FIFO
+  posicaoFila: { type: Number, default: null },
+  dataEntradaFila: { type: Date, default: null },
 
   saldo: { type: Number, default: 0 },
   totalGanho: { type: Number, default: 0 },

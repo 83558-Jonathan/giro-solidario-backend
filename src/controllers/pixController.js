@@ -1,6 +1,7 @@
 const abacate = require('../config/abacate');
 const Transacao = require('../models/Transacao');
 const Rodada = require('../models/Rodada');
+const RodadaService = require('../services/rodadaService');
 
 // Constantes de taxas
 const TAXA_PLATAFORMA = 0.10; // 10%
@@ -92,9 +93,9 @@ async function processarPagamentoComControle(transacaoId, source = 'webhook') {
         console.log(`✅ [${source}] Participante ${participante.usuario} marcado como pago`);
         console.log(`📊 [${source}] Progresso: ${vermelhosPagos.length}/${vermelhos.length}`);
 
-        // Verificar se todos pagaram
-        if (vermelhosPagos.length === vermelhos.length && vermelhos.length > 0) {
-            console.log(`🎉 [${source}] TODOS OS ${vermelhos.length} VERMELHOS PAGARAM!`);
+        // Verificar se todos pagaram (8 vermelhos)
+        if (vermelhosPagos.length === vermelhos.length && vermelhos.length === 8) {
+            console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`);
 
             // Atualizar flag da rodada
             if (!rodada.todosDepositaram) {
@@ -104,8 +105,13 @@ async function processarPagamentoComControle(transacaoId, source = 'webhook') {
                 console.log(`✅ [${source}] Rodada marcada como "todos depositaram"`);
             }
 
-            // Aqui você pode chamar o serviço de avanço da rodada
-            // await RodadaService.avancarRodada(rodada._id);
+            // Chamar o serviço de avanço da rodada
+            try {
+                await RodadaService.avancarRodada(rodada._id);
+                console.log(`✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`);
+            } catch (err) {
+                console.error(`❌ [${source}] Erro ao avançar rodada:`, err);
+            }
         }
 
         // Limpar do cache após 10 minutos (tempo suficiente para evitar duplicatas)
@@ -266,11 +272,10 @@ exports.verificarStatus = async (req, res) => {
                 // Se pagamento foi confirmado na API
                 if (statusApi === 'PAID' || statusApi === 'COMPLETED' || statusApi === 'CONFIRMED') {
                     console.log(`💰 Pagamento detectado para transação ${transacaoId}`);
-                    
+
                     // USAR A FUNÇÃO COM CONTROLE DE DUPLICIDADE
-                    const { processarPagamentoComControle } = require('./pixWebhook');
                     const result = await processarPagamentoComControle(transacaoId, 'verificarStatus');
-                    
+
                     if (result.jaProcessado) {
                         console.log(`⚠️ Pagamento ${transacaoId} já foi processado anteriormente`);
                     }
@@ -285,7 +290,7 @@ exports.verificarStatus = async (req, res) => {
 
         // Buscar transação atualizada após possível processamento
         const transacaoAtualizada = await Transacao.findById(transacaoId);
-        
+
         res.json({
             success: true,
             status: transacaoAtualizada.status,
@@ -413,4 +418,14 @@ exports.renovarCobrancaPix = async (req, res) => {
             error: error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
         });
     }
+};
+
+// ===========================================
+// EXPORTAR A FUNÇÃO PARA USO NO WEBHOOK
+// ===========================================
+module.exports = {
+    criarCobrancaPix: exports.criarCobrancaPix,
+    verificarStatus: exports.verificarStatus,
+    renovarCobrancaPix: exports.renovarCobrancaPix,
+    processarPagamentoComControle
 };
