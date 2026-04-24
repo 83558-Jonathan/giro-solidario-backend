@@ -189,6 +189,7 @@ app.use('/api/pix', require('./src/routes/pix.routes'));
 app.use('/api/webhook', require('./src/routes/webhook.routes'));
 app.use('/api/email', require('./src/routes/email.routes'));
 app.use('/api/admin', require('./src/routes/admin.routes'));
+app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'));
 
 // Rota de teste
 app.get('/api/health', (req, res) => {

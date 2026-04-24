@@ -1348,11 +1348,11 @@ class RodadaService {
         throw new Error('Usuario nao encontrado');
       }
 
-      // Verificar se o usuario tem algum premio pendente
+      // Verificar se o usuario tem alguma solicitacao PENDENTE
       const SolicitacaoSaque = require('../models/SolicitacaoSaque');
       const solicitacaoPendente = await SolicitacaoSaque.findOne({
         usuario: usuarioId,
-        status: { $in: ['pendente', 'aprovado'] }
+        status: 'pendente'
       });
 
       if (solicitacaoPendente) {
@@ -1378,7 +1378,6 @@ class RodadaService {
         }
       }).sort({ createdAt: 1 });
 
-      // Se nao tem rodada com vaga, buscar rodada aguardando com estrutura
       if (!rodadaParaEntrar) {
         rodadaParaEntrar = await Rodada.findOne({
           status: 'aguardando',
@@ -1395,25 +1394,24 @@ class RodadaService {
       }
 
       if (rodadaParaEntrar) {
-        // Adicionar como vermelho na rodada existente
-        console.log(`   Usuario sera adicionado como VERMELHO na rodada ${rodadaParaEntrar.nome}`);
         await this.adicionarParticipanteVermelho(rodadaParaEntrar._id.toString(), usuarioId, null);
+
+        // Retorno para quando entra em rodada
         return {
-          success: true,
-          message: `Voce foi adicionado como VERMELHO na ${rodadaParaEntrar.nome}!`,
+          message: `Você foi adicionado como VERMELHO na ${rodadaParaEntrar.nome}!`,
+          cor: 'vermelho',
           rodadaId: rodadaParaEntrar._id,
-          cor: 'vermelho'
+          aguardando: false
         };
       }
 
       // Se nao tem rodada disponivel, colocar na fila de espera
-      console.log(`   Nenhuma rodada disponivel. Usuario sera colocado na FILA DE ESPERA`);
       usuario.aguardandoVermelho = true;
       await usuario.save();
 
+      // Retorno para quando vai para fila
       return {
-        success: true,
-        message: 'Nenhuma rodada disponivel no momento. Voce foi colocado na FILA DE ESPERA e sera avisado quando houver vaga.',
+        message: 'Nenhuma rodada disponível no momento. Você foi colocado na FILA DE ESPERA e será avisado quando houver vaga.',
         cor: 'amarelo',
         aguardando: true
       };

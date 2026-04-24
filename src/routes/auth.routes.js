@@ -15,7 +15,7 @@ const {
     validateResetPassword
 } = require('../middleware/validation');
 
-// Rotas publicas COM VALIDAÇÃO
+// Rotas publicas
 router.post('/registrar', validateRegister, registrar);
 router.post('/login', validateLogin, login);
 router.post('/forgot-password', validateForgotPassword, forgotPassword);

@@ -243,13 +243,33 @@ exports.verificarStatusUsuario = async (req, res) => {
 exports.jogarNovamente = async (req, res) => {
   try {
     const usuarioId = req.usuarioId;
-
     const result = await RodadaService.jogarNovamente(usuarioId);
 
-    res.json({ success: true, data: result });
+    // Retornar os dados diretamente no nível principal para o frontend
+    const response = {
+      success: true,
+      message: result.message,
+      data: result
+    };
+    
+    // Se houver propriedades específicas, promover para o nível principal
+    if (result.cor) {
+      response.cor = result.cor;
+    }
+    if (result.aguardando !== undefined) {
+      response.aguardando = result.aguardando;
+    }
+    if (result.rodadaId) {
+      response.rodadaId = result.rodadaId;
+    }
+    
+    res.json(response);
   } catch (error) {
     console.error('Erro ao jogar novamente:', error);
-    res.status(400).json({ success: false, error: error.message });
+    res.status(400).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
@@ -261,7 +281,14 @@ exports.sacarPremio = async (req, res) => {
     const { rodadaId } = req.params;
     const usuarioId = req.usuarioId;
 
+    console.log('\n' + '='.repeat(60));
+    console.log('💰 [SACAR PRÊMIO] INICIANDO SOLICITAÇÃO');
+    console.log('='.repeat(60));
+    console.log(`   Rodada ID: ${rodadaId}`);
+    console.log(`   Usuário ID do token: ${usuarioId}`);
+
     if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+      console.log('❌ ID da rodada inválido');
       return res.status(400).json({ success: false, error: 'ID da rodada inválido' });
     }
 
@@ -271,20 +298,53 @@ exports.sacarPremio = async (req, res) => {
     });
 
     if (!rodada) {
+      console.log('❌ Rodada não encontrada');
       return res.status(404).json({ success: false, error: 'Rodada não encontrada' });
     }
 
+    console.log(`\n📊 DADOS DA RODADA:`);
+    console.log(`   Nome: ${rodada.nome}`);
+    console.log(`   Status: ${rodada.status}`);
+    console.log(`   Verde (campo): ${rodada.verde}`);
+    console.log(`   Tipo do verde: ${typeof rodada.verde}`);
+    console.log(`   Prêmio pago: ${rodada.premioVerdePago}`);
+
     if (rodada.status !== 'concluida') {
+      console.log(`❌ Rodada não está concluída. Status atual: ${rodada.status}`);
       return res.status(400).json({ success: false, error: 'Esta rodada ainda não foi concluída' });
     }
 
-    // ✅ CORREÇÃO: Verificar se o usuário é o VERDE ou se é um participante com cor 'concluido' (ganhou o prêmio)
-    const ehVerde = rodada.verde?.toString() === usuarioId;
+    // ✅ CORREÇÃO: Converter ambos para string para comparação segura
+    const verdeIdStr = rodada.verde?.toString ? rodada.verde.toString() : String(rodada.verde);
+    const usuarioIdStr = String(usuarioId);
+    const ehVerde = verdeIdStr === usuarioIdStr;
+
     const participanteConcluido = rodada.participantes?.find(
-      p => p.usuario.toString() === usuarioId && p.cor === 'concluido'
+      p => p.usuario.toString() === usuarioIdStr && p.cor === 'concluido'
     );
 
+    console.log(`\n🔍 VERIFICANDO PERMISSÃO:`);
+    console.log(`   Usuario ID (string): ${usuarioIdStr}`);
+    console.log(`   Verde da rodada (string): ${verdeIdStr}`);
+    console.log(`   É o verde? ${ehVerde ? 'SIM ✅' : 'NÃO ❌'}`);
+
+    if (participanteConcluido) {
+      console.log(`   Participante concluído encontrado: SIM ✅`);
+    } else {
+      console.log(`   Participante concluído encontrado: NÃO ❌`);
+    }
+
+    // Listar todos os participantes com cor 'concluido' para debug
+    const todosConcluidos = rodada.participantes?.filter(p => p.cor === 'concluido') || [];
+    console.log(`\n📋 PARTICIPANTES COM COR 'concluido' (ganhadores):`);
+    for (const p of todosConcluidos) {
+      const user = await db.collection('users').findOne({ _id: p.usuario });
+      console.log(`   - ${user?.nome || p.usuario} (ID: ${p.usuario})`);
+    }
+
     if (!ehVerde && !participanteConcluido) {
+      console.log(`\n❌ ACESSO NEGADO! Usuário não tem permissão para sacar este prêmio.`);
+      console.log(`   Motivo: Não é o VERDE da rodada e não tem cor 'concluido'`);
       return res.status(403).json({
         success: false,
         error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
@@ -292,13 +352,21 @@ exports.sacarPremio = async (req, res) => {
     }
 
     if (rodada.premioVerdePago === true) {
+      console.log(`❌ Prêmio já foi solicitado anteriormente`);
       return res.status(400).json({ success: false, error: 'Prêmio já foi solicitado anteriormente' });
     }
 
     const usuario = await User.findById(usuarioId);
     if (!usuario) {
+      console.log(`❌ Usuário não encontrado no banco`);
       return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
     }
+
+    console.log(`\n👤 DADOS DO USUÁRIO:`);
+    console.log(`   Nome: ${usuario.nome}`);
+    console.log(`   Email: ${usuario.email}`);
+    console.log(`   Chave PIX: ${usuario.chavePix}`);
+    console.log(`   Tipo Chave PIX: ${usuario.tipoChavePix}`);
 
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,
@@ -311,21 +379,25 @@ exports.sacarPremio = async (req, res) => {
     });
 
     await solicitacao.save();
+    console.log(`✅ Solicitação de saque criada (ID: ${solicitacao._id})`);
 
     // Marcar que já foi solicitado (evita duplicidade)
     await db.collection('rodadas').updateOne(
       { _id: new mongoose.Types.ObjectId(rodadaId) },
       { $set: { premioVerdePago: true } }
     );
+    console.log(`✅ Rodada marcada como premiada (premioVerdePago = true)`);
 
-    console.log(`💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`);
+    console.log(`\n💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`);
+    console.log('='.repeat(60) + '\n');
 
     // Enviar email de notificação para o admin
     try {
       const emailController = require('./emailController');
       await emailController.notificarAdminNovaSolicitacao(usuario, rodada, 900);
+      console.log(`📧 Email de notificação enviado para o admin`);
     } catch (emailError) {
-      console.error('Erro ao notificar admin:', emailError);
+      console.error('❌ Erro ao notificar admin:', emailError);
     }
 
     res.json({
@@ -335,7 +407,10 @@ exports.sacarPremio = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro ao solicitar saque:', error);
+    console.error('\n💥 ERRO AO SOLICITAR SAQUE:');
+    console.error(`   Mensagem: ${error.message}`);
+    console.error(`   Stack: ${error.stack}`);
+    console.log('='.repeat(60) + '\n');
     res.status(500).json({ success: false, error: error.message });
   }
 };

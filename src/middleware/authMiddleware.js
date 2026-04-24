@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-module.exports = async (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
@@ -17,7 +17,7 @@ module.exports = async (req, res, next) => {
     const usuario = await User.findById(decoded.id).select('-senha');
     
     if (!usuario) {
-      return res.status(401).json({ success: false, error: 'Não autorizado' });
+      return res.status(401).json({ success: false, error: 'Usuário não encontrado' });
     }
 
     req.usuario = usuario;
@@ -27,3 +27,5 @@ module.exports = async (req, res, next) => {
     return res.status(401).json({ success: false, error: 'Token inválido' });
   }
 };
+
+module.exports = authMiddleware;

@@ -1,0 +1,13 @@
+{
+  "verbose": true,
+  "watch": ["src/", "server.js"],
+  "ext": "js,json",
+  "ignore": ["node_modules/", "logs/"],
+  "events": {
+    "restart": "echo '🔄 Aplicação reiniciada'"
+  },
+  "env": {
+    "NODE_ENV": "development",
+    "DEBUG": "express:*"
+  }
+}

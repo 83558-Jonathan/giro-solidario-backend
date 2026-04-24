@@ -1,34 +1,31 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/authMiddleware');
 const adminController = require('../controllers/adminController');
-const User = require('../models/User');
+const authMiddleware = require('../middleware/authMiddleware');
 
-// Verificar se é admin
-const isAdmin = async (req, res, next) => {
-    try {
-        const user = await User.findById(req.usuarioId);
-        if (user.role !== 'admin') {
-            return res.status(403).json({ success: false, error: 'Acesso negado. Área restrita para administradores.' });
-        }
-        next();
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+// Middleware de admin simples
+const adminOnly = (req, res, next) => {
+  if (req.usuario && req.usuario.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ success: false, error: 'Acesso negado' });
+  }
 };
 
-// Todas as rotas admin requerem autenticação e role admin
+// Todas as rotas admin exigem autenticação
 router.use(authMiddleware);
-router.use(isAdmin);
+router.use(adminOnly);
 
-// Dashboard / Estatísticas
-router.get('/estatisticas', adminController.estatisticas);
+// Estatísticas
+router.get('/estatisticas', adminController.getEstatisticas);
 
-// Solicitações de saque
-router.get('/saques/pendentes', adminController.listarSolicitacoesPendentes);
-router.get('/saques', adminController.listarTodasSolicitacoes);
-router.post('/saques/:solicitacaoId/aprovar', adminController.aprovarSaque);
-router.post('/saques/:solicitacaoId/recusar', adminController.recusarSaque);
-router.post('/saques/:solicitacaoId/pago', adminController.marcarComoPago);
+// Saques
+router.get('/saques/pendentes', adminController.getSaquesPendentes);
+router.get('/saques', adminController.getTodosSaques);
+router.post('/saques/:id/aprovar', adminController.aprovarSaque);
+router.post('/saques/:id/recusar', adminController.recusarSaque);
+
+// Rodadas (detalhadas para admin)
+router.get('/rodadas/:id', adminController.getRodadaDetalhes);
 
 module.exports = router;

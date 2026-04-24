@@ -12,7 +12,7 @@ router.get('/', userController.listarUsuarios);
 // Buscar usuário por ID
 router.get('/:id', userController.buscarUsuario);
 
-// Atualizar usuário (opcional - se tiver no controller)
+// Atualizar usuário
 router.put('/:id', userController.atualizarUsuario);
 
 // Listar indicados de um usuário
