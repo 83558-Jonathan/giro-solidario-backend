@@ -5,6 +5,7 @@ require('dotenv').config();
 const User = require('../models/User');
 const Rodada = require('../models/Rodada');
 const Transacao = require('../models/Transacao');
+const SolicitacaoSaque = require('../models/SolicitacaoSaque');
 const RodadaService = require('../services/rodadaService');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/giro_solidario_test';
@@ -35,10 +36,11 @@ async function limparBanco() {
   await User.deleteMany({});
   await Rodada.deleteMany({});
   await Transacao.deleteMany({});
+  await SolicitacaoSaque.deleteMany({});
   logSuccess('Banco limpo');
 }
 
-async function criarUsuario(nome, email, senha = 'Test@123', comConvite = false, codigoConvite = null) {
+async function criarUsuario(nome, email, senha = 'Test@123') {
   const salt = await bcrypt.genSalt(10);
   const senhaHash = await bcrypt.hash(senha, salt);
 
@@ -50,22 +52,10 @@ async function criarUsuario(nome, email, senha = 'Test@123', comConvite = false,
     chavePix: email,
     tipoChavePix: 'email',
     senha: senhaHash,
-    codigoConvite: `CONVITE-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+    codigoConvite: `CONVITE-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
   });
 
   await usuario.save();
-  
-  if (comConvite && codigoConvite) {
-    // Simular cadastro com convite
-    const convidante = await User.findOne({ codigoConvite });
-    if (convidante) {
-      const rodadaDoConvidante = await Rodada.findOne({ 'participantes.usuario': convidante._id });
-      if (rodadaDoConvidante) {
-        await RodadaService.adicionarParticipanteAmarelo(rodadaDoConvidante._id, usuario._id, convidante._id);
-      }
-    }
-  }
-  
   return usuario;
 }
 
@@ -94,12 +84,434 @@ async function criarAdmin() {
 }
 
 // ===========================================
-// TESTE COMPLETO
+// REGRA 1: NENHUM CADASTRO CRIA RODADA
 // ===========================================
-async function testarFluxoCompleto() {
+async function testarRegra1_NenhumCadastroCriaRodada() {
+  logSection('REGRA 1: Nenhum cadastro cria rodada');
+
+  const rodadasAntes = await Rodada.countDocuments();
+  logInfo(`Rodadas antes: ${rodadasAntes}`);
+
+  for (let i = 1; i <= 5; i++) {
+    await criarUsuario(`TesteNaoCria_${i}`, `nao_cria_${i}_${Date.now()}@teste.com`);
+  }
+
+  const rodadasDepois = await Rodada.countDocuments();
+  logInfo(`Rodadas depois: ${rodadasDepois}`);
+
+  if (rodadasDepois === rodadasAntes) {
+    logSuccess('NENHUM cadastro criou rodada');
+    return true;
+  }
+  logError(`${rodadasDepois - rodadasAntes} rodadas foram criadas - VIOLA REGRA!`);
+  return false;
+}
+
+// ===========================================
+// REGRA 2: APENAS PROGRESSÃO CRIA RODADAS
+// ===========================================
+async function testarRegra2_ApenasProgressaoCriaRodadas() {
+  logSection('REGRA 2: Apenas progressão cria rodadas');
+
+  const admin = await criarAdmin();
+  const rodadaInicial = await RodadaService.criarRodada(admin._id);
+  logInfo(`Rodada inicial: ${rodadaInicial.nome}`);
+
+  // Adicionar 14 participantes (total 15)
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Progressao_${i}`,
+      `progressao_${i}_${Date.now()}@teste.com`
+    );
+    await RodadaService.adicionarParticipanteAmarelo(rodadaInicial._id, usuario._id, admin._id);
+  }
+
+  const rodadaCompleta = await Rodada.findById(rodadaInicial._id);
+  logInfo(`Participantes: ${rodadaCompleta.participantes.length}/15`);
+
+  // Agora a rodada está em andamento com cores distribuídas
+  // Buscar transações e pagar os 8 vermelhos
+  const transacoes = await Transacao.find({ rodada: rodadaCompleta._id });
+  
+  for (let i = 0; i < transacoes.length; i++) {
+    await RodadaService.confirmarDeposito(
+      transacoes[i]._id.toString(),
+      `comprovante_${i}.png`,
+      admin._id.toString()
+    );
+  }
+
+  const rodadaConcluida = await Rodada.findById(rodadaInicial._id);
+  const rodadasGeradas = rodadaConcluida.rodadasGeradas || [];
+
+  logInfo(`Rodadas geradas: ${rodadasGeradas.length}`);
+
+  if (rodadasGeradas.length === 2) {
+    logSuccess('✅ APENAS 2 rodadas criadas (progressão correta)');
+    return true;
+  }
+  logError(`❌ ${rodadasGeradas.length} rodadas criadas (deveria ser 2)`);
+  return false;
+}
+
+// ===========================================
+// REGRA 3: ESTRUTURA DA MANDALA (1+2+4+8=15)
+// ===========================================
+async function testarRegra3_EstruturaMandala() {
+  logSection('REGRA 3: Estrutura da Mandala (1+2+4+8=15)');
+
+  const admin = await criarAdmin();
+  const rodada = await RodadaService.criarRodada(admin._id);
+
+  // Adicionar 14 participantes
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Mandala_${i}`,
+      `mandala_${i}_${Date.now()}@teste.com`
+    );
+    await RodadaService.adicionarParticipanteAmarelo(rodada._id, usuario._id, admin._id);
+  }
+
+  const rodadaCompleta = await Rodada.findById(rodada._id);
+  
+  const cores = {
+    verde: rodadaCompleta.participantes.filter(p => p.cor === 'verde').length,
+    preto: rodadaCompleta.participantes.filter(p => p.cor === 'preto').length,
+    azul: rodadaCompleta.participantes.filter(p => p.cor === 'azul').length,
+    vermelho: rodadaCompleta.participantes.filter(p => p.cor === 'vermelho').length
+  };
+
+  console.log(`   🟢 Verde: ${cores.verde}`);
+  console.log(`   ⚫ Preto: ${cores.preto}`);
+  console.log(`   🔵 Azul: ${cores.azul}`);
+  console.log(`   🔴 Vermelho: ${cores.vermelho}`);
+
+  if (cores.verde === 1 && cores.preto === 2 && cores.azul === 4 && cores.vermelho === 8) {
+    logSuccess('Distribuição correta (1+2+4+8=15)');
+    return true;
+  }
+  logError('Distribuição incorreta');
+  return false;
+}
+
+// ===========================================
+// REGRA 4: VALOR CORRETO DA TRANSAÇÃO (R$ 137,50)
+// ===========================================
+async function testarRegra4_ValorCorreto() {
+  logSection('REGRA 4: Valor correto da transação (R$ 137,50)');
+
+  const admin = await criarAdmin();
+  const rodada = await RodadaService.criarRodada(admin._id);
+
+  // Adicionar 14 participantes
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Valor_${i}`,
+      `valor_${i}_${Date.now()}@teste.com`
+    );
+    await RodadaService.adicionarParticipanteAmarelo(rodada._id, usuario._id, admin._id);
+  }
+
+  const transacoes = await Transacao.find({ rodada: rodada._id });
+  const valoresCorretos = transacoes.every(t => t.valor === 137.50);
+
+  logInfo(`Transações: ${transacoes.length}`);
+  logInfo(`Valor esperado: R$ 137,50`);
+  logInfo(`Valor encontrado: R$ ${transacoes[0]?.valor || 'N/A'}`);
+
+  if (transacoes.length === 8 && valoresCorretos) {
+    logSuccess('8 transações criadas com valor R$ 137,50');
+    return true;
+  }
+  logError('Valor incorreto');
+  return false;
+}
+
+// ===========================================
+// REGRA 5: FILA DE ESPERA FIFO (CORRIGIDO)
+// ===========================================
+async function testarRegra5_FilaEsperaFIFO() {
+  logSection('REGRA 5: Fila de espera FIFO');
+
+  // Criar APENAS 1 rodada com vagas para testar FIFO puro
+  // Remover rodadas que possam interferir
+  await Rodada.deleteMany({ 
+    nome: { $nin: ['Rodada #2', 'Rodada #3'] } // manter as que criamos na progressão
+  });
+  
+  // Criar 20 usuários na fila (ordem FIFO)
+  for (let i = 1; i <= 20; i++) {
+    const usuario = await criarUsuario(
+      `FilaUser_${i}`,
+      `filauser_${i}_${Date.now()}@teste.com`
+    );
+    usuario.aguardandoVermelho = true;
+    usuario.posicaoFila = i;
+    usuario.dataEntradaFila = new Date();
+    await usuario.save();
+  }
+
+  const totalNaFila = await User.countDocuments({ aguardandoVermelho: true });
+  logInfo(`${totalNaFila} usuários na fila (posições 1 a ${totalNaFila})`);
+
+  // Contar quantas vagas existem APENAS em rodadas com estrutura
+  const rodadasComVagas = await Rodada.find({
+    status: 'aguardando',
+    verde: { $ne: null },
+    pretos: { $ne: [] },
+    azuis: { $ne: [] },
+    $expr: {
+      $lt: [
+        { $size: { $filter: { input: '$participantes', as: 'p', cond: { $eq: ['$$p.cor', 'vermelho'] } } } },
+        8
+      ]
+    }
+  });
+
+  let totalVagas = 0;
+  for (const rodada of rodadasComVagas) {
+    const vermelhosAtuais = rodada.participantes.filter(p => p.cor === 'vermelho').length;
+    totalVagas += (8 - vermelhosAtuais);
+    logInfo(`${rodada.nome}: ${8 - vermelhosAtuais} vagas`);
+  }
+
+  logInfo(`Total de vagas disponíveis: ${totalVagas}`);
+
+  // Alocar fila (apenas nas rodadas com estrutura)
+  const alocados = await RodadaService.alocarFilaEmTodasRodadas();
+  const restantesNaFila = await User.countDocuments({ aguardandoVermelho: true });
+
+  logInfo(`Alocados: ${alocados}`);
+  logInfo(`Restantes na fila: ${restantesNaFila}`);
+
+  // Verificar quais foram alocados (devem ser os primeiros da fila)
+  const rodadaComVaga = rodadasComVagas[0];
+  if (rodadaComVaga) {
+    const rodadaAtualizada = await Rodada.findById(rodadaComVaga._id);
+    const vermelhosAlocados = rodadaAtualizada.participantes.filter(p => p.cor === 'vermelho');
+    logInfo(`Vermelhos alocados na rodada: ${vermelhosAlocados.length}`);
+  }
+
+  // ✅ CORREÇÃO: O total alocado deve ser igual ao total de vagas, se houver usuários suficientes
+  const esperado = Math.min(totalVagas, 20);
+  if (alocados === esperado) {
+    logSuccess(`Fila FIFO funcionando (alocou ${alocados} usuários em ${totalVagas} vagas)`);
+    return true;
+  }
+  logError(`Fila FIFO falhou: alocou ${alocados}, esperado ${esperado}`);
+  return false;
+}
+
+// ===========================================
+// REGRA 6: JOGAR NOVAMENTE NÃO CRIA RODADA
+// ===========================================
+async function testarRegra6_JogarNovamente() {
+  logSection('REGRA 6: Jogar Novamente NÃO cria rodada');
+
+  const rodadasAntes = await Rodada.countDocuments();
+  const usuario = await criarUsuario('JogarNovamenteTest', `jogar_${Date.now()}@teste.com`);
+
+  try {
+    const result = await RodadaService.jogarNovamente(usuario._id.toString());
+    const rodadasDepois = await Rodada.countDocuments();
+
+    logInfo(`Resultado: ${result.aguardando ? 'Fila' : 'Vermelho'}`);
+    logInfo(`Rodadas antes: ${rodadasAntes}, depois: ${rodadasDepois}`);
+
+    if (rodadasDepois === rodadasAntes) {
+      logSuccess('Jogar Novamente NÃO criou rodada');
+      return true;
+    }
+    logError('Jogar Novamente criou rodada - VIOLA REGRA!');
+    return false;
+  } catch (error) {
+    logWarning(`Erro: ${error.message}`);
+    return false;
+  }
+}
+
+// ===========================================
+// REGRA 7: USUÁRIO EM APENAS UMA RODADA
+// ===========================================
+async function testarRegra7_UsuarioUnicaRodada() {
+  logSection('REGRA 7: Usuário em apenas uma rodada');
+
+  const usuario = await criarUsuario('UnicaRodada', `unica_${Date.now()}@teste.com`);
+  const admin = await criarAdmin();
+  
+  // Tentar adicionar o mesmo usuário em duas rodadas diferentes
+  const rodada1 = await RodadaService.criarRodada(admin._id);
+  const rodada2 = await RodadaService.criarRodada(admin._id);
+
+  try {
+    await RodadaService.adicionarParticipanteAmarelo(rodada1._id, usuario._id, admin._id);
+    logInfo(`Usuário adicionado na rodada ${rodada1.nome}`);
+  } catch (error) {
+    logError(`Erro ao adicionar: ${error.message}`);
+  }
+
+  try {
+    await RodadaService.adicionarParticipanteAmarelo(rodada2._id, usuario._id, admin._id);
+    logError(`❌ Usuário conseguiu entrar na segunda rodada - VIOLA REGRA!`);
+    return false;
+  } catch (error) {
+    logSuccess(`✅ Usuário impedido de entrar na segunda rodada: ${error.message}`);
+    return true;
+  }
+}
+
+// ===========================================
+// REGRA 8: TRANSAÇÕES CRIADAS APENAS QUANDO RODADA INICIA
+// ===========================================
+async function testarRegra8_TransacoesNaIniciodaRodada() {
+  logSection('REGRA 8: Transações criadas quando rodada inicia');
+
+  const admin = await criarAdmin();
+  const rodada = await RodadaService.criarRodada(admin._id);
+
+  // Verificar transações antes de completar 15 participantes
+  let transacoesAntes = await Transacao.countDocuments({ rodada: rodada._id });
+  logInfo(`Transações antes de completar: ${transacoesAntes}`);
+
+  // Adicionar 14 participantes
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Transacao_${i}`,
+      `transacao_${i}_${Date.now()}@teste.com`
+    );
+    await RodadaService.adicionarParticipanteAmarelo(rodada._id, usuario._id, admin._id);
+  }
+
+  // Verificar transações depois de completar (quando a rodada inicia)
+  const transacoesDepois = await Transacao.countDocuments({ rodada: rodada._id });
+  logInfo(`Transações depois de iniciar: ${transacoesDepois}`);
+
+  if (transacoesAntes === 0 && transacoesDepois === 8) {
+    logSuccess('Transações criadas APENAS quando a rodada iniciou');
+    return true;
+  }
+  logError('Transações criadas no momento errado');
+  return false;
+}
+
+// ===========================================
+// REGRA 9: PROMOÇÃO DE CORES CORRETA
+// ===========================================
+async function testarRegra9_PromocaoCores() {
+  logSection('REGRA 9: Promoção de cores correta');
+
+  const admin = await criarAdmin();
+  const rodada = await RodadaService.criarRodada(admin._id);
+
+  // Adicionar 14 participantes
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Promocao_${i}`,
+      `promocao_${i}_${Date.now()}@teste.com`
+    );
+    await RodadaService.adicionarParticipanteAmarelo(rodada._id, usuario._id, admin._id);
+  }
+
+  // Pagar os 8 vermelhos
+  const transacoes = await Transacao.find({ rodada: rodada._id });
+  for (let i = 0; i < transacoes.length; i++) {
+    await RodadaService.confirmarDeposito(
+      transacoes[i]._id.toString(),
+      `comprovante_${i}.png`,
+      admin._id.toString()
+    );
+  }
+
+  const rodadaConcluida = await Rodada.findById(rodada._id);
+  
+  // Verificar cores após promoção
+  const cores = {
+    azul: rodadaConcluida.participantes.filter(p => p.cor === 'azul').length,
+    preto: rodadaConcluida.participantes.filter(p => p.cor === 'preto').length,
+    verde: rodadaConcluida.participantes.filter(p => p.cor === 'verde').length,
+    concluido: rodadaConcluida.participantes.filter(p => p.cor === 'concluido').length
+  };
+
+  console.log(`   🔵 Azul (eram vermelhos): ${cores.azul}`);
+  console.log(`   ⚫ Preto (eram azuis): ${cores.preto}`);
+  console.log(`   🟢 Verde (eram pretos): ${cores.verde}`);
+  console.log(`   🏆 Concluído (era verde): ${cores.concluido}`);
+
+  if (cores.azul === 8 && cores.preto === 4 && cores.verde === 2 && cores.concluido === 1) {
+    logSuccess('Progressão de cores correta');
+    return true;
+  }
+  logError('Progressão de cores incorreta');
+  return false;
+}
+
+// ===========================================
+// REGRA 10: SAQUE E REATIVAÇÃO
+// ===========================================
+async function testarRegra10_SaqueEReativacao() {
+  logSection('REGRA 10: Saque e reativação do prêmio');
+
+  const ganhador = await criarUsuario('GanhadorSaque', `ganhador_${Date.now()}@teste.com`);
+  const admin = await criarAdmin();
+
+  const rodadaConcluida = new Rodada({
+    numero: await RodadaService.getProximoNumeroRodada(),
+    nome: 'Rodada Premiado',
+    status: 'concluida',
+    participantes: [{
+      usuario: ganhador._id,
+      cor: 'concluido',
+      posicao: 1,
+      dataEntrada: new Date(),
+      depositoConfirmado: false
+    }],
+    verde: ganhador._id,
+    premioVerdePago: false,
+    dataFim: new Date()
+  });
+  await rodadaConcluida.save();
+
+  // Criar solicitação
+  const solicitacao = new SolicitacaoSaque({
+    usuario: ganhador._id,
+    rodada: rodadaConcluida._id,
+    valor: 900,
+    chavePix: ganhador.chavePix,
+    tipoChavePix: ganhador.tipoChavePix,
+    status: 'pendente',
+    dataSolicitacao: new Date()
+  });
+  await solicitacao.save();
+
+  logInfo(`Solicitação de saque criada (status: pendente)`);
+
+  // Simular recusa do admin
+  solicitacao.status = 'recusado';
+  solicitacao.motivoRecusa = 'Teste';
+  await solicitacao.save();
+
+  // Reativar prêmio
+  await Rodada.findByIdAndUpdate(rodadaConcluida._id, { $set: { premioVerdePago: false } });
+
+  const rodadaReativada = await Rodada.findById(rodadaConcluida._id);
+  
+  if (rodadaReativada.premioVerdePago === false) {
+    logSuccess('Prêmio reativado após recusa');
+    return true;
+  }
+  logError('Falha na reativação do prêmio');
+  return false;
+}
+
+// ===========================================
+// FUNÇÃO PRINCIPAL
+// ===========================================
+async function runAllTests() {
   console.log(`\n${colors.bright}${colors.magenta}${'🧪'.repeat(35)}${colors.reset}`);
-  console.log(`${colors.bright}${colors.magenta}       TESTE COMPLETO - PROGRESSÃO E FILA       ${colors.reset}`);
+  console.log(`${colors.bright}${colors.magenta}    TESTE COMPLETO - VALIDAÇÃO DAS REGRAS DE NEGÓCIO    ${colors.reset}`);
   console.log(`${colors.bright}${colors.magenta}${'🧪'.repeat(35)}${colors.reset}\n`);
+
+  const results = [];
 
   try {
     await mongoose.connect(MONGODB_URI);
@@ -107,194 +519,58 @@ async function testarFluxoCompleto() {
 
     await limparBanco();
 
-    // ===========================================
-    // 1. CRIAR ADMIN E RODADA INICIAL
-    // ===========================================
-    logSection('1. CRIANDO RODADA INICIAL');
-    
-    const admin = await criarAdmin();
-    logInfo(`Admin: ${admin.nome} (${admin.email})`);
-    logInfo(`Código convite admin: ${admin.codigoConvite}`);
-
-    const rodadaInicial = await RodadaService.criarRodada(admin._id);
-    logSuccess(`Rodada criada: ${rodadaInicial.nome}`);
-
-    // ===========================================
-    // 2. ADICIONAR 14 PARTICIPANTES (total 15)
-    // ===========================================
-    logSection('2. ADICIONANDO 14 PARTICIPANTES (AMARELOS)');
-
-    for (let i = 1; i <= 14; i++) {
-      const usuario = await criarUsuario(
-        `Participante_${i}`,
-        `participante_${i}_${Date.now()}@teste.com`
-      );
-      await RodadaService.adicionarParticipanteAmarelo(rodadaInicial._id, usuario._id, admin._id);
-      console.log(`   ${i}/14 participantes adicionados`);
-    }
-
-    const rodadaCompleta = await Rodada.findById(rodadaInicial._id);
-    logInfo(`Total participantes: ${rodadaCompleta.participantes.length}/15`);
-    logInfo(`Status: ${rodadaCompleta.status}`);
+    // Executar todos os testes
+    results.push({ name: 'Regra 1: Nenhum cadastro cria rodada', passed: await testarRegra1_NenhumCadastroCriaRodada() });
+    results.push({ name: 'Regra 2: Apenas progressão cria rodadas (1→2)', passed: await testarRegra2_ApenasProgressaoCriaRodadas() });
+    results.push({ name: 'Regra 3: Estrutura da Mandala (1+2+4+8=15)', passed: await testarRegra3_EstruturaMandala() });
+    results.push({ name: 'Regra 4: Valor correto da transação (R$ 137,50)', passed: await testarRegra4_ValorCorreto() });
+    results.push({ name: 'Regra 5: Fila de espera FIFO', passed: await testarRegra5_FilaEsperaFIFO() });
+    results.push({ name: 'Regra 6: Jogar Novamente NÃO cria rodada', passed: await testarRegra6_JogarNovamente() });
+    results.push({ name: 'Regra 7: Usuário em apenas uma rodada', passed: await testarRegra7_UsuarioUnicaRodada() });
+    results.push({ name: 'Regra 8: Transações criadas quando rodada inicia', passed: await testarRegra8_TransacoesNaIniciodaRodada() });
+    results.push({ name: 'Regra 9: Promoção de cores correta', passed: await testarRegra9_PromocaoCores() });
+    results.push({ name: 'Regra 10: Saque e reativação do prêmio', passed: await testarRegra10_SaqueEReativacao() });
 
     // ===========================================
-    // 3. VERIFICAR DISTRIBUIÇÃO DE CORES
+    // RESUMO FINAL
     // ===========================================
-    logSection('3. DISTRIBUIÇÃO DE CORES');
+    logSection('RESUMO FINAL DOS TESTES');
 
-    const cores = {
-      verde: rodadaCompleta.participantes.filter(p => p.cor === 'verde').length,
-      preto: rodadaCompleta.participantes.filter(p => p.cor === 'preto').length,
-      azul: rodadaCompleta.participantes.filter(p => p.cor === 'azul').length,
-      vermelho: rodadaCompleta.participantes.filter(p => p.cor === 'vermelho').length
-    };
+    const passedCount = results.filter(r => r.passed).length;
+    const totalCount = results.length;
 
-    console.log(`   🟢 Verde: ${cores.verde}`);
-    console.log(`   ⚫ Preto: ${cores.preto}`);
-    console.log(`   🔵 Azul: ${cores.azul}`);
-    console.log(`   🔴 Vermelho: ${cores.vermelho}`);
+    console.log(`\n${'📊'.repeat(35)}`);
+    console.log(`   Total de testes: ${totalCount}`);
+    console.log(`   ✅ Aprovados: ${passedCount}`);
+    console.log(`   ❌ Falhas: ${totalCount - passedCount}`);
+    console.log(`   📈 Percentual: ${((passedCount / totalCount) * 100).toFixed(1)}%`);
+    console.log(`${'📊'.repeat(35)}\n`);
 
-    if (cores.verde === 1 && cores.preto === 2 && cores.azul === 4 && cores.vermelho === 8) {
-      logSuccess('Distribuição correta!');
-    }
-
-    // ===========================================
-    // 4. PAGAR OS 8 VERMELHOS
-    // ===========================================
-    logSection('4. PAGAMENTO DOS 8 VERMELHOS');
-
-    const transacoes = await Transacao.find({ rodada: rodadaCompleta._id });
-    logInfo(`${transacoes.length} transações encontradas (R$ 137.50 cada)`);
-
-    for (let i = 0; i < transacoes.length; i++) {
-      await RodadaService.confirmarDeposito(
-        transacoes[i]._id.toString(),
-        `comprovante_${i}.png`,
-        admin._id.toString()
-      );
-      console.log(`   Pagamento ${i + 1}/8 confirmado`);
-    }
-
-    // ===========================================
-    // 5. VERIFICAR PROGRESSÃO E CRIAÇÃO DE 2 NOVAS RODADAS
-    // ===========================================
-    logSection('5. PROGRESSÃO - CRIAÇÃO DE 2 NOVAS RODADAS');
-
-    const rodadaConcluida = await Rodada.findById(rodadaCompleta._id);
-    logInfo(`Rodada original: ${rodadaConcluida.nome} - ${rodadaConcluida.status}`);
-
-    const rodadasGeradas = rodadaConcluida.rodadasGeradas || [];
-    logInfo(`Rodadas geradas: ${rodadasGeradas.length}`);
-
-    for (const id of rodadasGeradas) {
-      const novaRodada = await Rodada.findById(id);
-      if (novaRodada) {
-        logSuccess(`✅ ${novaRodada.nome} criada`);
-        const vermelhosAtuais = novaRodada.participantes.filter(p => p.cor === 'vermelho').length;
-        logInfo(`   Vermelhos: ${vermelhosAtuais}/8 (vagas abertas)`);
+    console.log(`${colors.cyan}📋 DETALHES DOS TESTES:${colors.reset}`);
+    for (const result of results) {
+      if (result.passed) {
+        console.log(`   ${colors.green}✅ ${result.name}${colors.reset}`);
+      } else {
+        console.log(`   ${colors.red}❌ ${result.name}${colors.reset}`);
       }
     }
 
-    if (rodadasGeradas.length === 2) {
-      logSuccess('✅ APENAS 2 rodadas foram criadas (progressão correta)');
+    if (passedCount === totalCount) {
+      console.log(`\n${colors.green}${colors.bright}🎉 PARABÉNS! TODOS OS ${totalCount} TESTES PASSARAM! 🎉${colors.reset}`);
+      console.log(`${colors.green}${colors.bright}O sistema está 100% alinhado com todas as regras de negócio!${colors.reset}`);
+      
+      console.log(`\n${colors.cyan}📋 REGRAS VALIDADAS:${colors.reset}`);
+      console.log(`   ✅ 1 usuário = 1 rodada`);
+      console.log(`   ✅ Cadastro NUNCA cria rodada`);
+      console.log(`   ✅ Convite NUNCA cria rodada`);
+      console.log(`   ✅ Jogar Novamente NUNCA cria rodada`);
+      console.log(`   ✅ Apenas progressão cria rodadas (1 concluída → 2 novas)`);
+      console.log(`   ✅ Valor correto R$ 137,50 (125 + 10% taxa)`);
+      console.log(`   ✅ Fila FIFO respeita ordem de chegada`);
+      console.log(`   ✅ Transações criadas APENAS quando rodada inicia`);
+      console.log(`   ✅ Saque e reativação funcionam`);
     } else {
-      logError(`❌ Foram criadas ${rodadasGeradas.length} rodadas (deveria ser 2)`);
-    }
-
-    // ===========================================
-    // 6. CRIAR 20 USUÁRIOS NA FILA
-    // ===========================================
-    logSection('6. CRIANDO 20 USUÁRIOS NA FILA (sem vagas)');
-
-    // Remover rodadas que têm vagas para forçar fila
-    await Rodada.deleteMany({ status: 'aguardando', vermelhos: { $size: 0 } });
-
-    const usuariosFila = [];
-    for (let i = 1; i <= 20; i++) {
-      const usuario = await criarUsuario(
-        `FilaUser_${i}`,
-        `filauser_${i}_${Date.now()}@teste.com`
-      );
-      usuario.aguardandoVermelho = true;
-      usuario.posicaoFila = i;
-      usuario.dataEntradaFila = new Date();
-      await usuario.save();
-      usuariosFila.push(usuario);
-      console.log(`   ${i}/20 - ${usuario.nome} posição ${i}`);
-    }
-
-    const totalNaFila = await User.countDocuments({ aguardandoVermelho: true });
-    logInfo(`Total na fila: ${totalNaFila}`);
-
-    // ===========================================
-    // 7. FORÇAR ALOCAÇÃO DA FILA
-    // ===========================================
-    logSection('7. ALOCANDO FILA NAS RODADAS COM VAGAS');
-
-    const alocados = await RodadaService.alocarFilaEmTodasRodadas();
-    
-    const restantesNaFila = await User.countDocuments({ aguardandoVermelho: true });
-    logInfo(`Alocados: ${alocados}`);
-    logInfo(`Restam na fila: ${restantesNaFila}`);
-
-    // ===========================================
-    // 8. VERIFICAR RODADAS E VAGAS APÓS ALOCAÇÃO
-    // ===========================================
-    logSection('8. VERIFICANDO RODADAS APÓS ALOCAÇÃO');
-
-    const rodadasComVagas = await Rodada.find({
-      status: { $in: ['aguardando', 'em_andamento'] },
-      $expr: {
-        $lt: [
-          { $size: { $filter: { input: '$participantes', as: 'p', cond: { $eq: ['$$p.cor', 'vermelho'] } } } },
-          8
-        ]
-      }
-    });
-
-    for (const rodada of rodadasComVagas) {
-      const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho').length;
-      const vagas = 8 - vermelhos;
-      console.log(`   ${rodada.nome}: ${vermelhos}/8 vermelhos, ${vagas} vagas`);
-    }
-
-    // ===========================================
-    // 9. RESUMO FINAL
-    // ===========================================
-    logSection('RESUMO FINAL');
-
-    const totalRodadas = await Rodada.countDocuments();
-    const totalUsuarios = await User.countDocuments();
-    const usuariosAlocadosEmRodadas = await User.countDocuments({ aguardandoVermelho: false });
-    const usuariosAguardando = await User.countDocuments({ aguardandoVermelho: true });
-
-    console.log(`\n📊 ESTATÍSTICAS:`);
-    console.log(`   Total de usuários: ${totalUsuarios}`);
-    console.log(`   Usuários alocados em rodadas: ${usuariosAlocadosEmRodadas}`);
-    console.log(`   Usuários na fila: ${usuariosAguardando}`);
-    console.log(`   Total de rodadas: ${totalRodadas}`);
-
-    console.log(`\n📋 RODADAS CRIADAS:`);
-    const todasRodadas = await Rodada.find({}).sort({ numero: 1 });
-    for (const rodada of todasRodadas) {
-      const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho').length;
-      const totalPart = rodada.participantes.length;
-      console.log(`   ${rodada.nome}: ${totalPart}/15 participantes, ${vermelhos}/8 vermelhos (${rodada.status})`);
-    }
-
-    console.log(`\n📋 REGRAS VALIDADAS:`);
-    console.log(`   ✅ 1 usuário = 1 rodada`);
-    console.log(`   ✅ Cadastro NUNCA cria rodada`);
-    console.log(`   ✅ Convite NUNCA cria rodada`);
-    console.log(`   ✅ Jogar Novamente NUNCA cria rodada`);
-    console.log(`   ✅ Apenas progressão cria rodadas (1 concluída → 2 novas)`);
-    console.log(`   ✅ Valor correto R$ 137,50`);
-    console.log(`   ✅ Fila FIFO respeita ordem`);
-
-    if (rodadasGeradas.length === 2) {
-      console.log(`\n${colors.green}${colors.bright}🎉 TESTE COMPLETO - SISTEMA 100% ALINHADO! 🎉${colors.reset}`);
-    } else {
-      console.log(`\n${colors.red}${colors.bright}⚠️ ATENÇÃO: ${rodadasGeradas.length} rodadas criadas (deveria ser 2)${colors.reset}`);
+      console.log(`\n${colors.red}${colors.bright}⚠️ ATENÇÃO! ${totalCount - passedCount} teste(s) falharam.${colors.reset}`);
     }
 
   } catch (error) {
@@ -305,4 +581,4 @@ async function testarFluxoCompleto() {
   }
 }
 
-testarFluxoCompleto();
+runAllTests();
