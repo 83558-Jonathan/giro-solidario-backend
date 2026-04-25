@@ -12,6 +12,11 @@ const PORT = process.env.PORT || 5001;
 const criarAdmin = require('./src/scripts/seedAdmin');
 
 // ===========================================
+// IMPORTAR SERVICES
+// ===========================================
+const RodadaService = require('./src/services/rodadaService');
+
+// ===========================================
 // TRUST PROXY (para obter IP real do cliente via Cloudflare)
 // ===========================================
 app.set('trust proxy', true);
@@ -26,6 +31,20 @@ const getRealIp = (req) => {
   }
   return req.ip || req.connection.remoteAddress;
 };
+
+// ===========================================
+// ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA
+// ===========================================
+
+// Executar a cada 30 segundos para garantir que a fila seja processada
+setInterval(async () => {
+  try {
+    console.log(`\n[CRON] Verificando e alocando fila de espera...`);
+    await RodadaService.alocarFilaEmTodasRodadas();
+  } catch (error) {
+    console.error('[CRON] Erro na alocação periódica da fila:', error.message);
+  }
+}, 30000); // 30 segundos
 
 // ===========================================
 // CONFIGURACOES DE SEGURANCA
@@ -173,6 +192,12 @@ mongoose.connect(process.env.MONGODB_URI, {
   .then(async () => {
     console.log('✅ MongoDB Conectado');
     criarAdmin().catch(err => console.error('Erro ao criar admin:', err));
+
+    // Executar alocação inicial da fila após 5 segundos
+    setTimeout(async () => {
+      console.log(`\n[STARTUP] Executando alocação inicial da fila...`);
+      await RodadaService.alocarFilaEmTodasRodadas();
+    }, 5000);
   })
   .catch(err => console.error('Erro MongoDB:', err));
 
@@ -226,7 +251,8 @@ app.get('/', (req, res) => {
         mandala: 'GET /api/rodadas/:id/mandala',
         participar: 'POST /api/rodadas/:id/participantes',
         iniciar: 'POST /api/rodadas/:id/iniciar',
-        avancar: 'POST /api/rodadas/:id/avancar'
+        avancar: 'POST /api/rodadas/:id/avancar',
+        forcarAlocacaoFila: 'POST /api/rodadas/admin/forcar-alocacao-fila'
       },
       transacoes: {
         minhas: 'GET /api/transacoes/minhas',
@@ -296,9 +322,9 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`
-  Servidor rodando na porta ${PORT}
-  Ambiente: ${process.env.NODE_ENV || 'development'}
-  URL: http://localhost:${PORT}
+  🚀 Servidor rodando na porta ${PORT}
+  📍 Ambiente: ${process.env.NODE_ENV || 'development'}
+  🔗 URL: http://localhost:${PORT}
   `);
 });
 

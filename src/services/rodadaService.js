@@ -710,14 +710,39 @@ class RodadaService {
   }
 
   // ===========================================
-  // ALOCAR FILA DE ESPERA (FIFO - CORRIGIDO)
+  // ALOCAR FILA EM TODAS AS RODADAS COM VAGAS (NOVO - CORRIGIDO)
   // ===========================================
-  async alocarFilaNasRodadas(rodadas) {
+  async alocarFilaEmTodasRodadas() {
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`[ALOCAR FILA] Iniciando alocação FIFO`);
+    console.log(`[ALOCAR FILA TOTAL] Verificando todas as rodadas com vagas`);
     console.log(`${'='.repeat(60)}`);
 
-    // ✅ CORREÇÃO 1: Buscar em ordem FIFO por posicaoFila (NÃO createdAt)
+    // Buscar TODAS as rodadas que podem receber vermelhos
+    const rodadasComVagas = await Rodada.find({
+      status: { $in: ['aguardando', 'em_andamento'] },
+      $expr: {
+        $lt: [
+          { $size: { $filter: { input: '$participantes', as: 'p', cond: { $eq: ['$$p.cor', 'vermelho'] } } } },
+          8
+        ]
+      }
+    }).sort({ createdAt: 1 });
+
+    if (rodadasComVagas.length === 0) {
+      console.log(`   Nenhuma rodada com vaga para vermelho`);
+      return 0;
+    }
+
+    // Calcular TOTAL de vagas disponíveis
+    let totalVagas = 0;
+    for (const rodada of rodadasComVagas) {
+      const vermelhosAtuais = rodada.participantes.filter(p => p.cor === 'vermelho').length;
+      const vagas = 8 - vermelhosAtuais;
+      totalVagas += vagas;
+      console.log(`   ${rodada.nome}: ${vagas} vagas (${vermelhosAtuais}/8)`);
+    }
+
+    // Buscar TODOS os usuários na fila (ordem FIFO)
     const filaUsuarios = await User.find({ aguardandoVermelho: true })
       .sort({ posicaoFila: 1 });
 
@@ -726,25 +751,15 @@ class RodadaService {
       return 0;
     }
 
-    console.log(`   ${filaUsuarios.length} usuário(s) na fila (ordem FIFO):`);
-    filaUsuarios.forEach(u => console.log(`      Pos ${u.posicaoFila}: ${u.nome}`));
-
-    // Calcular total de vagas disponíveis
-    let totalVagas = 0;
-    for (const rodada of rodadas) {
-      const vermelhosAtuais = rodada.participantes.filter(p => p.cor === 'vermelho').length;
-      const vagas = 8 - vermelhosAtuais;
-      totalVagas += vagas;
-      console.log(`   ${rodada.nome}: ${vagas} vagas (${vermelhosAtuais}/8)`);
-    }
-
-    console.log(`\n   Total de vagas: ${totalVagas}`);
+    console.log(`\n   Total de vagas disponíveis: ${totalVagas}`);
     console.log(`   Usuários na fila: ${filaUsuarios.length}`);
+    console.log(`   Serão alocados: ${Math.min(totalVagas, filaUsuarios.length)} usuários`);
 
     let alocados = 0;
     let indexFila = 0;
 
-    for (const rodada of rodadas) {
+    // Percorrer TODAS as rodadas com vagas
+    for (const rodada of rodadasComVagas) {
       let vagasRestantes = 8 - rodada.participantes.filter(p => p.cor === 'vermelho').length;
 
       console.log(`\n   Processando ${rodada.nome}: ${vagasRestantes} vagas`);
@@ -809,8 +824,6 @@ class RodadaService {
         }
       }
 
-      await rodada.save();
-
       if (indexFila >= filaUsuarios.length) {
         console.log(`   Fim da fila alcançado`);
         break;
@@ -818,14 +831,15 @@ class RodadaService {
     }
 
     const restantes = await User.countDocuments({ aguardandoVermelho: true });
-    console.log(`\n✅ ALOCAÇÃO CONCLUÍDA: ${alocados} usuários alocados`);
-    console.log(`   Restam na fila: ${restantes}`);
+    console.log(`\n✅ ALOCAÇÃO TOTAL CONCLUÍDA: ${alocados} usuários alocados`);
+    console.log(`   Restam na fila: ${restantes} (aguardando próximas vagas)`);
+    console.log(`${'='.repeat(60)}\n`);
 
     return alocados;
   }
 
   // ===========================================
-  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS (CORRIGIDO)
+  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS (SOMENTE 2)
   // ===========================================
   async avancarRodada(rodadaId) {
     // PREVENIR PROCESSAMENTO DUPLICADO
@@ -853,6 +867,7 @@ class RodadaService {
 
       console.log(`[DEBUG] Rodada: ${rodada.nome}, Status atual: ${rodada.status}`);
 
+      // ✅ VERIFICAÇÃO ADICIONAL: Se já está concluída, não faz nada
       if (rodada.status === 'concluida') {
         console.log(`[DEBUG] Rodada ${rodada.nome} ja esta concluida. Ignorando.`);
         return rodada;
@@ -861,6 +876,12 @@ class RodadaService {
       if (rodada.status !== 'em_andamento') {
         console.error(`[DEBUG] Rodada nao esta em andamento. Status: ${rodada.status}`);
         throw new Error('Rodada nao esta em andamento');
+      }
+
+      // ✅ VERIFICAÇÃO ADICIONAL: Se já gerou rodadas, não processa novamente
+      if (rodada.rodadasGeradas && rodada.rodadasGeradas.length > 0) {
+        console.log(`[DEBUG] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas. Ignorando.`);
+        return rodada;
       }
 
       // ===========================================
@@ -887,38 +908,21 @@ class RodadaService {
       // ===========================================
       console.log(`[DEBUG] Promovendo cores...`);
 
-      let contador = {
-        vermelho_para_azul: 0,
-        azul_para_preto: 0,
-        preto_para_verde: 0,
-        verde_para_concluido: 0
-      };
-
-      rodada.participantes.forEach(p => {
+      for (const p of rodada.participantes) {
         if (p.cor === 'vermelho') {
           p.cor = 'azul';
-          contador.vermelho_para_azul++;
           console.log(`   vermelho->azul ${p.usuario}`);
         } else if (p.cor === 'azul') {
           p.cor = 'preto';
-          contador.azul_para_preto++;
           console.log(`   azul->preto ${p.usuario}`);
         } else if (p.cor === 'preto') {
           p.cor = 'verde';
-          contador.preto_para_verde++;
           console.log(`   preto->verde ${p.usuario}`);
         } else if (p.cor === 'verde') {
           p.cor = 'concluido';
-          contador.verde_para_concluido++;
           console.log(`   verde->concluido ${p.usuario} (ganhou R$ 900)`);
         }
-      });
-
-      console.log(`[DEBUG] Resumo promocao:`);
-      console.log(`   vermelho->azul: ${contador.vermelho_para_azul}`);
-      console.log(`   azul->preto: ${contador.azul_para_preto}`);
-      console.log(`   preto->verde: ${contador.preto_para_verde}`);
-      console.log(`   verde->concluido: ${contador.verde_para_concluido}`);
+      }
 
       // ===========================================
       // 4. SEPARAR PARTICIPANTES POR COR APOS PROMOCAO
@@ -926,26 +930,20 @@ class RodadaService {
       const novosVerdes = rodada.participantes.filter(p => p.cor === 'verde');
       const novosPretos = rodada.participantes.filter(p => p.cor === 'preto');
       const novosAzuis = rodada.participantes.filter(p => p.cor === 'azul');
-      const concluidos = rodada.participantes.filter(p => p.cor === 'concluido');
 
-      console.log(`[DEBUG] Apos promocao:`);
-      console.log(`   Verdes: ${novosVerdes.length}`);
-      console.log(`   Pretos: ${novosPretos.length}`);
-      console.log(`   Azuis: ${novosAzuis.length}`);
-      console.log(`   Concluidos: ${concluidos.length}`);
+      console.log(`[DEBUG] Apos promocao: Verdes: ${novosVerdes.length}, Pretos: ${novosPretos.length}, Azuis: ${novosAzuis.length}`);
 
       // Validar quantidade de verdes
       if (novosVerdes.length !== 2) {
         console.error(`[DEBUG] ERRO: Numero de verdes insuficiente: ${novosVerdes.length}. Esperado: 2`);
-        console.log(`[DEBUG] Nao sera possivel gerar novas rodadas.`);
         await rodada.save();
         return rodada;
       }
 
       // ===========================================
-      // 5. CRIAR 2 NOVAS RODADAS COM OS PARTICIPANTES PROMOVIDOS
+      // 5. CRIAR 2 NOVAS RODADAS (APENAS 2 - PROGRESSÃO)
       // ===========================================
-      console.log(`[DEBUG] 2 verdes encontrados! Gerando novas rodadas...`);
+      console.log(`[DEBUG] 2 verdes encontrados! Gerando 2 novas rodadas...`);
 
       const verdesIds = novosVerdes.map(v => v.usuario);
       const pretosIds = novosPretos.map(p => p.usuario);
@@ -977,20 +975,20 @@ class RodadaService {
         rodada._id
       );
 
+      // ✅ MARCAR QUE AS RODADAS FORAM GERADAS (evita duplicação)
       rodada.rodadasGeradas = [novaRodada1._id, novaRodada2._id];
       console.log(`[DEBUG] Rodadas geradas com sucesso!`);
 
       // ===========================================
-      // 6. ALOCAR USUARIOS DA FILA DE ESPERA (FIFO - CORRIGIDO)
+      // 6. ALOCAR USUARIOS DA FILA DE ESPERA EM TODAS AS RODADAS COM VAGAS
       // ===========================================
-      await this.alocarFilaNasRodadas([novaRodada1, novaRodada2]);
+      await this.alocarFilaEmTodasRodadas();
 
       // ===========================================
       // 7. FINALIZAR RODADA ORIGINAL COMO CONCLUÍDA
       // ===========================================
       console.log(`\n[FINALIZACAO] Finalizando rodada original como concluída...`);
 
-      // Registrar no histórico a conclusão da rodada e quem ganhou
       rodada.historicoMovimentacoes.push({
         usuario: verdeAtual.usuario,
         corAnterior: 'verde',
@@ -1006,8 +1004,7 @@ class RodadaService {
       await rodada.save();
 
       console.log(`[FINALIZACAO] Rodada ${rodada.nome} concluída com sucesso!`);
-      console.log(`   🏆 Verde vencedor: ${verdeAtual?.usuario} ganhou R$ 900`);
-      console.log(`   Participantes mantidos no histórico: ${rodada.participantes.length}`);
+      console.log(`   🏆 Verde vencedor ganhou R$ 900`);
       console.log(`   Novas rodadas geradas: ${rodada.rodadasGeradas.length}`);
 
       return rodada;
@@ -1301,47 +1298,36 @@ class RodadaService {
         return false;
       }
 
-      // Se ja esta concluida, nao faz nada
+      // ✅ Já está concluída
       if (rodada.status === 'concluida') {
         console.log(`[AUTO] Rodada ${rodada.nome} ja esta concluida.`);
         return true;
       }
 
-      // Se nao esta em andamento, nao avanca
+      // ✅ Já gerou rodadas (proteção contra duplicação)
+      if (rodada.rodadasGeradas && rodada.rodadasGeradas.length > 0) {
+        console.log(`[AUTO] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas.`);
+        return true;
+      }
+
       if (rodada.status !== 'em_andamento') {
         console.log(`[AUTO] Rodada ${rodada.nome} nao esta em andamento (status: ${rodada.status})`);
         return false;
       }
 
-      // Contar vermelhos pagos
       const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho');
       const vermelhosPagos = vermelhos.filter(v => v.depositoConfirmado === true);
-      const todosPagos = vermelhosPagos.length === vermelhos.length && vermelhos.length > 0;
+      const todosPagos = vermelhosPagos.length === 8;
 
-      console.log(`[AUTO] Rodada ${rodada.nome}: ${vermelhosPagos.length}/${vermelhos.length} vermelhos pagos`);
+      console.log(`[AUTO] Rodada ${rodada.nome}: ${vermelhosPagos.length}/8 vermelhos pagos`);
 
-      // Se todos pagaram e ainda nao avancou, FORCAR AVANCO!
-      if (todosPagos && !rodada.todosDepositaram) {
-        console.log(`[AUTO] DETECTADO: Todos pagaram mas rodada nao avancou! Forcando avanco...`);
-
-        rodada.todosDepositaram = true;
-        rodada.dataTodosDepositaram = new Date();
-        await rodada.save();
-
+      if (todosPagos) {
+        console.log(`[AUTO] Todos pagaram! Avancando rodada...`);
         await this.avancarRodada(rodadaId);
         console.log(`[AUTO] Rodada ${rodada.nome} avancada com sucesso!`);
         return true;
       }
 
-      // Se ja esta marcada como todos depositaram mas nao avancou
-      if (rodada.todosDepositaram && rodada.status === 'em_andamento') {
-        console.log(`[AUTO] Rodada marcada como todos depositaram mas ainda em andamento! Forcando avanco...`);
-        await this.avancarRodada(rodadaId);
-        console.log(`[AUTO] Rodada ${rodada.nome} avancada com sucesso!`);
-        return true;
-      }
-
-      console.log(`[AUTO] Rodada ${rodada.nome} OK - Aguardando mais ${vermelhos.length - vermelhosPagos.length} pagamentos`);
       return false;
 
     } catch (error) {

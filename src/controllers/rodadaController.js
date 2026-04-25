@@ -172,6 +172,32 @@ exports.avancarRodada = async (req, res) => {
 };
 
 // ===========================================
+// FORÇAR ALOCAÇÃO DA FILA (admin)
+// ===========================================
+exports.forcarAlocacaoFila = async (req, res) => {
+  try {
+    // Verificar se é admin
+    const user = await User.findById(req.usuarioId);
+    if (user.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Acesso negado' });
+    }
+
+    const alocados = await RodadaService.alocarFilaEmTodasRodadas();
+    const restantes = await User.countDocuments({ aguardandoVermelho: true });
+
+    res.json({
+      success: true,
+      message: `Alocação forçada concluída. ${alocados} usuários alocados.`,
+      alocados,
+      restantes
+    });
+  } catch (error) {
+    console.error('Erro ao forçar alocação:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ===========================================
 // VER MANDALA - COM VERIFICAÇÃO AUTOMÁTICA
 // ===========================================
 exports.getMandala = async (req, res) => {
@@ -251,7 +277,7 @@ exports.jogarNovamente = async (req, res) => {
       message: result.message,
       data: result
     };
-    
+
     // Se houver propriedades específicas, promover para o nível principal
     if (result.cor) {
       response.cor = result.cor;
@@ -262,13 +288,13 @@ exports.jogarNovamente = async (req, res) => {
     if (result.rodadaId) {
       response.rodadaId = result.rodadaId;
     }
-    
+
     res.json(response);
   } catch (error) {
     console.error('Erro ao jogar novamente:', error);
-    res.status(400).json({ 
-      success: false, 
-      error: error.message 
+    res.status(400).json({
+      success: false,
+      error: error.message
     });
   }
 };

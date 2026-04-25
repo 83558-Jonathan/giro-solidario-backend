@@ -8,7 +8,7 @@
     const erros = [];
 
     // Função para gerar dados aleatórios
-    const gerarNome = (i) => `teste${i})}`;
+    const gerarNome = (i) => `teste${i}`;
     const gerarEmail = (i) => `teste${i}@teste.com`;
     const gerarCPF = () => {
         const cpf = Math.floor(Math.random() * 99999999999).toString().padStart(11, '0');

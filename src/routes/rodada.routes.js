@@ -27,7 +27,10 @@ router.post('/:rodadaId/iniciar', rodadaController.iniciarRodada);
 // Sacar prêmio do verde
 router.post('/:rodadaId/sacar-premio', rodadaController.sacarPremio);
 
-// Adicione esta linha no arquivo de rotas
+// Jogar novamente
 router.post('/jogar-novamente', rodadaController.jogarNovamente);
+
+// Forçar alocação da fila (admin)
+router.post('/admin/forcar-alocacao-fila', rodadaController.forcarAlocacaoFila);
 
 module.exports = router;
