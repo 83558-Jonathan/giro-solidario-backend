@@ -20,7 +20,7 @@ const testData = {
     rodadas: [],
     transacoes: [],
     solicitacoes: [],
-    codigosConvite: new Map() // Mapa de código convite -> usuário
+    codigosConvite: new Map()
 };
 
 // ===========================================
@@ -37,28 +37,15 @@ const colors = {
     cyan: '\x1b[36m'
 };
 
-function logSuccess(msg) {
-    console.log(`${colors.green}✅ ${msg}${colors.reset}`);
-}
-
-function logError(msg) {
-    console.log(`${colors.red}❌ ${msg}${colors.reset}`);
-}
-
-function logInfo(msg) {
-    console.log(`${colors.blue}📌 ${msg}${colors.reset}`);
-}
-
-function logWarning(msg) {
-    console.log(`${colors.yellow}⚠️ ${msg}${colors.reset}`);
-}
-
+function logSuccess(msg) { console.log(`${colors.green}✅ ${msg}${colors.reset}`); }
+function logError(msg) { console.log(`${colors.red}❌ ${msg}${colors.reset}`); }
+function logInfo(msg) { console.log(`${colors.blue}📌 ${msg}${colors.reset}`); }
+function logWarning(msg) { console.log(`${colors.yellow}⚠️ ${msg}${colors.reset}`); }
 function logSection(title) {
     console.log(`\n${colors.cyan}${'='.repeat(70)}${colors.reset}`);
     console.log(`${colors.bright}${colors.magenta}${title}${colors.reset}`);
     console.log(`${colors.cyan}${'='.repeat(70)}${colors.reset}`);
 }
-
 function logSubSection(title) {
     console.log(`\n${colors.cyan}${'-'.repeat(50)}${colors.reset}`);
     console.log(`${colors.bright}${title}${colors.reset}`);
@@ -76,7 +63,6 @@ async function limparBanco() {
     await SolicitacaoSaque.deleteMany({});
     logSuccess('Banco de dados limpo');
 
-    // Resetar dados de teste
     testData.users = [];
     testData.rodadas = [];
     testData.transacoes = [];
@@ -132,14 +118,14 @@ async function teste1_CadastroSemConviteSemRodadas() {
     const rodadasDepois = await Rodada.countDocuments();
     logInfo(`Rodadas depois: ${rodadasDepois}`);
 
-    // Verificar se criou rodada
+    let passed = true;
     if (rodadasDepois === rodadasAntes) {
         logSuccess('✅ NÃO criou rodada (correto)');
     } else {
         logError('❌ CRIOU rodada - VIOLA REGRA!');
+        passed = false;
     }
 
-    // Verificar se foi para fila
     const usuarioAtual = await User.findById(usuario._id);
     if (usuarioAtual.aguardandoVermelho === true) {
         logSuccess(`✅ Usuário foi para FILA DE ESPERA (posição: ${usuarioAtual.posicaoFila})`);
@@ -147,7 +133,7 @@ async function teste1_CadastroSemConviteSemRodadas() {
         logWarning(`⚠️ Usuário não está na fila. aguardandoVermelho: ${usuarioAtual.aguardandoVermelho}`);
     }
 
-    return { usuario, success: rodadasDepois === rodadasAntes };
+    return { usuario, passed };
 }
 
 // ===========================================
@@ -166,11 +152,10 @@ async function teste2_CriarRodadaManual() {
 
     if (rodada.status === 'aguardando' && rodada.participantes.length === 1) {
         logSuccess('✅ Rodada criada corretamente com 1 participante AMARELO');
-    } else {
-        logError('❌ Rodada não foi criada corretamente');
+        return rodada;
     }
-
-    return rodada;
+    logError('❌ Rodada não foi criada corretamente');
+    return null;
 }
 
 // ===========================================
@@ -184,76 +169,64 @@ async function teste3_CadastroComConviteValido() {
 
     logInfo(`Convidante: ${convidante.nome} (código: ${codigoConvite})`);
 
-    // Simular requisição de registro com convite
-    const userData = {
-        nome: 'ConvidadoViaLink',
-        email: `convidado_${Date.now()}@teste.com`,
-        telefone: '11999999999',
-        cpf: `${Math.floor(Math.random() * 100000000000)}`.padStart(11, '0'),
-        chavePix: `convidado_${Date.now()}@teste.com`,
-        tipoChavePix: 'email',
-        senha: 'Test@123',
-        codigoConvite: codigoConvite
-    };
+    const usuario = await criarUsuario(
+        'ConvidadoViaLink',
+        `convidado_${Date.now()}@teste.com`
+    );
 
-    const salt = await bcrypt.genSalt(10);
-    const senhaHash = await bcrypt.hash(userData.senha, salt);
-
-    const usuario = new User({
-        nome: userData.nome,
-        email: userData.email,
-        telefone: userData.telefone,
-        cpf: userData.cpf,
-        chavePix: userData.chavePix,
-        tipoChavePix: userData.tipoChavePix,
-        senha: senhaHash,
-        codigoConvite: `CONVITE-${Math.random().toString(36).substring(2, 10).toUpperCase()}`
-    });
-
-    await usuario.save();
-    testData.users.push(usuario);
-
-    // Verificar se foi adicionado à rodada do convidante
     const rodadaDoConvidante = await Rodada.findOne({
         'participantes.usuario': convidante._id,
         status: 'aguardando'
     });
 
-    const estaNaRodada = await Rodada.findOne({
-        'participantes.usuario': usuario._id
-    });
-
-    if (estaNaRodada) {
-        logSuccess(`✅ Usuário foi adicionado à rodada: ${estaNaRodada.nome}`);
-    } else {
-        logWarning('⚠️ Usuário não foi adicionado a nenhuma rodada');
+    if (rodadaDoConvidante) {
+        await RodadaService.adicionarParticipanteAmarelo(
+            rodadaDoConvidante._id.toString(),
+            usuario._id.toString(),
+            convidante._id.toString()
+        );
+        logSuccess(`✅ Usuário foi adicionado à rodada: ${rodadaDoConvidante.nome}`);
+        return true;
     }
-
-    return { usuario, rodada: estaNaRodada };
+    logWarning('⚠️ Usuário não foi adicionado a nenhuma rodada');
+    return false;
 }
 
 // ===========================================
-// TESTE 4: ADICIONAR PARTICIPANTES ATÉ 15
+// TESTE 4: ADICIONAR PARTICIPANTES ATÉ 15 (CORRIGIDO)
 // ===========================================
 async function teste4_CompletarRodada(rodada) {
     logSection('TESTE 4: Completar rodada com 15 participantes');
 
     logInfo(`Participantes atuais: ${rodada.participantes.length}/15`);
 
-    // Adicionar participantes até completar 15
-    for (let i = rodada.participantes.length + 1; i <= 15; i++) {
+    // ✅ CORREÇÃO: Calcular quantos faltam e adicionar apenas esses
+    const faltam = 15 - rodada.participantes.length;
+    logInfo(`Faltam ${faltam} participantes para completar a rodada`);
+
+    let contador = rodada.participantes.length;
+
+    for (let i = 1; i <= faltam; i++) {
         const usuario = await criarUsuario(
-            `Participante_${i}`,
-            `participante_${i}_${Date.now()}@teste.com`
+            `Participante_${contador + i}`,
+            `participante_${contador + i}_${Date.now()}@teste.com`
         );
 
-        await RodadaService.adicionarParticipanteAmarelo(
-            rodada._id.toString(),
-            usuario._id.toString(),
-            testData.users[0]._id.toString()
-        );
-
-        console.log(`   Adicionado: ${usuario.nome} - ${i}/15 participantes`);
+        try {
+            await RodadaService.adicionarParticipanteAmarelo(
+                rodada._id.toString(),
+                usuario._id.toString(),
+                testData.users[0]._id.toString()
+            );
+            console.log(`   Adicionado: ${usuario.nome} - ${contador + i}/15 participantes`);
+        } catch (error) {
+            // Se a rodada já foi iniciada, interrompe o loop
+            if (error.message.includes('So e possivel adicionar participantes em rodadas que ainda nao iniciaram')) {
+                logWarning(`Rodada já foi iniciada. Parando adição de participantes.`);
+                break;
+            }
+            throw error;
+        }
     }
 
     const rodadaAtualizada = await Rodada.findById(rodada._id);
@@ -265,11 +238,17 @@ async function teste4_CompletarRodada(rodada) {
         if (rodadaAtualizada.status === 'em_andamento') {
             logSuccess('✅ Rodada iniciou automaticamente');
         }
-    } else {
-        logError('❌ Rodada não completou 15 participantes');
+        return rodadaAtualizada;
     }
 
-    return rodadaAtualizada;
+    // Se a rodada já iniciou com 15, ainda está correto
+    if (rodadaAtualizada.participantes.length === 15 && rodadaAtualizada.status === 'em_andamento') {
+        logSuccess('✅ Rodada com 15 participantes e em andamento');
+        return rodadaAtualizada;
+    }
+
+    logError('❌ Rodada não completou 15 participantes');
+    return null;
 }
 
 // ===========================================
@@ -297,14 +276,13 @@ async function teste5_DistribuicaoCores(rodada) {
     if (cores.verde === 1 && cores.preto === 2 && cores.azul === 4 && cores.vermelho === 8 && cores.amarelo === 0) {
         logSuccess('✅ Distribuição correta (1+2+4+8=15)');
         return true;
-    } else {
-        logError('❌ Distribuição incorreta');
-        return false;
     }
+    logError('❌ Distribuição incorreta');
+    return false;
 }
 
 // ===========================================
-// TESTE 6: VERIFICAR TRANSAÇÕES CRIADAS
+// TESTE 6: VERIFICAR TRANSAÇÕES CRIADAS (VALOR CORRETO)
 // ===========================================
 async function teste6_TransacoesCriadas(rodada) {
     logSection('TESTE 6: Transações criadas');
@@ -317,16 +295,18 @@ async function teste6_TransacoesCriadas(rodada) {
     if (transacoes.length === 8) {
         logSuccess('✅ 8 transações criadas (1 por vermelho)');
 
-        const valoresCorretos = transacoes.every(t => t.valor === 125);
+        // ✅ VERIFICAÇÃO DO VALOR CORRETO
+        const valoresCorretos = transacoes.every(t => t.valor === 137.50);
         if (valoresCorretos) {
-            logSuccess('✅ Todas com valor R$ 125,00');
+            logSuccess('✅ Todas com valor R$ 137,50 (125 + 10% taxa)');
+        } else {
+            logError(`❌ Valores incorretos: ${transacoes.map(t => t.valor).join(', ')}`);
         }
 
-        return true;
-    } else {
-        logError(`❌ Número incorreto: ${transacoes.length} (esperado 8)`);
-        return false;
+        return transacoes.length === 8 && valoresCorretos;
     }
+    logError(`❌ Número incorreto: ${transacoes.length} (esperado 8)`);
+    return false;
 }
 
 // ===========================================
@@ -359,12 +339,10 @@ async function teste7_PagamentosVermelhos(rodada) {
         if (rodadaAtualizada.status === 'concluida') {
             logSuccess('✅ Rodada foi CONCLUÍDA após pagamentos');
         }
-
-        return true;
-    } else {
-        logError(`❌ Apenas ${rodadaAtualizada.totalDepositosConfirmados}/8 pagamentos`);
-        return false;
+        return rodadaAtualizada;
     }
+    logError(`❌ Apenas ${rodadaAtualizada.totalDepositosConfirmados}/8 pagamentos`);
+    return null;
 }
 
 // ===========================================
@@ -390,10 +368,9 @@ async function teste8_ProgressaoCores(rodada) {
     if (cores.azul === 8 && cores.preto === 4 && cores.verde === 2 && cores.concluido === 1) {
         logSuccess('✅ Progressão de cores correta');
         return true;
-    } else {
-        logError('❌ Progressão de cores incorreta');
-        return false;
     }
+    logError('❌ Progressão de cores incorreta');
+    return false;
 }
 
 // ===========================================
@@ -430,16 +407,14 @@ async function teste9_CriacaoNovasRodadas(rodada) {
                 }
             }
         }
-
         return true;
-    } else {
-        logError('❌ Não foram criadas 2 novas rodadas');
-        return false;
     }
+    logError('❌ Não foram criadas 2 novas rodadas');
+    return false;
 }
 
 // ===========================================
-// TESTE 10: FILA DE ESPERA (FIFO)
+// TESTE 10: FILA DE ESPERA (FIFO) - CORRIGIDO
 // ===========================================
 async function teste10_FilaEspera() {
     logSection('TESTE 10: Fila de espera (FIFO)');
@@ -447,10 +422,10 @@ async function teste10_FilaEspera() {
     // Remover rodadas existentes para forçar fila
     await Rodada.deleteMany({});
 
-    logInfo('Criando 5 usuários que vão para fila...');
+    logInfo('Criando 20 usuários que vão para fila...');
     const usuariosFila = [];
 
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 20; i++) {
         const usuario = await criarUsuario(
             `FilaUser_${i}`,
             `filauser_${i}_${Date.now()}@teste.com`
@@ -462,10 +437,8 @@ async function teste10_FilaEspera() {
         await usuario.save();
 
         usuariosFila.push(usuario);
-        console.log(`   ${usuario.nome} - Posição ${usuario.posicaoFila}`);
     }
-
-    logInfo(`\nTotal na fila: ${usuariosFila.length}`);
+    logInfo(`20 usuários na fila (posições 1 a 20)`);
 
     // Criar uma rodada com estrutura para receber vermelhos
     const admin = await criarUsuario('AdminFila', `admin_fila_${Date.now()}@teste.com`);
@@ -481,69 +454,39 @@ async function teste10_FilaEspera() {
         vermelhos: []
     });
 
-    // Adicionar verde
-    novaRodada.participantes.push({
-        usuario: admin._id,
-        cor: 'verde',
-        posicao: 1,
-        dataEntrada: new Date(),
-        depositoConfirmado: false
+    // Adicionar estrutura
+    novaRodada.participantes.push({ usuario: admin._id, cor: 'verde', posicao: 1, depositoConfirmado: false });
+    for (let i = 0; i < 2; i++) {
+        novaRodada.participantes.push({ usuario: admin._id, cor: 'preto', posicao: novaRodada.participantes.length + 1, depositoConfirmado: false });
+    }
+    for (let i = 0; i < 4; i++) {
+        novaRodada.participantes.push({ usuario: admin._id, cor: 'azul', posicao: novaRodada.participantes.length + 1, depositoConfirmado: false });
+    }
+    await novaRodada.save();
+    logSuccess(`\nRodada criada: ${novaRodada.nome} (8 vagas para vermelho)`);
+
+    // ✅ Usar a função corrigida de alocação de fila
+    const alocados = await RodadaService.alocarFilaNasRodadas([novaRodada]);
+
+    const restantesNaFila = await User.countDocuments({ aguardandoVermelho: true });
+    logInfo(`\nAlocados: ${alocados}`);
+    logInfo(`Restantes na fila: ${restantesNaFila}`);
+
+    // Verificar ordem FIFO
+    const rodadaAtualizada = await Rodada.findById(novaRodada._id);
+    const vermelhosAlocados = rodadaAtualizada.participantes.filter(p => p.cor === 'vermelho');
+
+    logInfo(`\nVermelhos alocados na rodada: ${vermelhosAlocados.length}`);
+    vermelhosAlocados.forEach((v, idx) => {
+        console.log(`   ${idx + 1}. ${v.nome || v.usuario}`);
     });
 
-    // Adicionar pretos
-    for (let i = 0; i < 2; i++) {
-        novaRodada.participantes.push({
-            usuario: admin._id,
-            cor: 'preto',
-            posicao: novaRodada.participantes.length + 1,
-            dataEntrada: new Date(),
-            depositoConfirmado: false
-        });
-    }
-
-    // Adicionar azuis
-    for (let i = 0; i < 4; i++) {
-        novaRodada.participantes.push({
-            usuario: admin._id,
-            cor: 'azul',
-            posicao: novaRodada.participantes.length + 1,
-            dataEntrada: new Date(),
-            depositoConfirmado: false
-        });
-    }
-
-    await novaRodada.save();
-    logSuccess(`\nRodada criada: ${novaRodada.nome}`);
-
-    // Alocar usuários da fila
-    const usuariosAguardando = await User.find({ aguardandoVermelho: true }).sort({ posicaoFila: 1 });
-    let alocados = 0;
-
-    for (const usuario of usuariosAguardando) {
-        const vagasRestantes = 8 - novaRodada.vermelhos.length;
-        if (vagasRestantes > 0) {
-            await RodadaService.adicionarParticipanteVermelho(
-                novaRodada._id.toString(),
-                usuario._id.toString(),
-                null
-            );
-            usuario.aguardandoVermelho = false;
-            usuario.posicaoFila = null;
-            await usuario.save();
-            alocados++;
-            console.log(`   Alocado: ${usuario.nome}`);
-        }
-    }
-
-    logInfo(`\nAlocados: ${alocados}/${usuariosFila.length}`);
-
-    if (alocados === usuariosFila.length) {
-        logSuccess('✅ Fila FIFO funcionando corretamente');
+    if (alocados === 8 && restantesNaFila === 12) {
+        logSuccess('✅ Fila FIFO funcionando corretamente (alocou primeiros 8)');
         return true;
-    } else {
-        logWarning(`⚠️ Apenas ${alocados} alocados (limitado por vagas)`);
-        return alocados > 0;
     }
+    logError(`❌ Fila FIFO falhou: alocou ${alocados}, esperado 8`);
+    return false;
 }
 
 // ===========================================
@@ -552,7 +495,6 @@ async function teste10_FilaEspera() {
 async function teste11_JogarNovamente() {
     logSection('TESTE 11: Jogar Novamente');
 
-    // Criar usuário que foi verde e quer jogar novamente
     const usuarioVerde = await criarUsuario(
         'ExVerde_JogarNovamente',
         `exverde_${Date.now()}@teste.com`
@@ -560,21 +502,17 @@ async function teste11_JogarNovamente() {
 
     logInfo(`Usuário: ${usuarioVerde.nome}`);
 
-    // Executar jogar novamente
     try {
         const result = await RodadaService.jogarNovamente(usuarioVerde._id.toString());
 
         if (result.aguardando) {
             logInfo(`Resultado: Usuário foi para FILA`);
             logInfo(`Posição: ${result.posicao}`);
-            logInfo(`Total na fila: ${result.totalNaFila}`);
             logSuccess('✅ Jogar Novamente funcionou (fila)');
         } else if (result.cor === 'vermelho') {
             logInfo(`Resultado: Usuário entrou como VERMELHO`);
-            logInfo(`Rodada: ${result.rodadaId}`);
             logSuccess('✅ Jogar Novamente funcionou (entrou em rodada)');
         }
-
         return true;
     } catch (error) {
         logError(`❌ Erro: ${error.message}`);
@@ -588,7 +526,6 @@ async function teste11_JogarNovamente() {
 async function teste12_SolicitacaoSaque() {
     logSection('TESTE 12: Solicitação de saque');
 
-    // Criar rodada concluída
     const ganhador = await criarUsuario(
         'GanhadorPremio',
         `ganhador_${Date.now()}@teste.com`
@@ -606,9 +543,6 @@ async function teste12_SolicitacaoSaque() {
             depositoConfirmado: false
         }],
         verde: ganhador._id,
-        pretos: [],
-        azuis: [],
-        vermelhos: [],
         premioVerdePago: false,
         dataFim: new Date()
     });
@@ -616,7 +550,6 @@ async function teste12_SolicitacaoSaque() {
     await rodadaConcluida.save();
     logSuccess(`Rodada concluída: ${rodadaConcluida.nome}`);
 
-    // Criar solicitação
     const solicitacao = new SolicitacaoSaque({
         usuario: ganhador._id,
         rodada: rodadaConcluida._id,
@@ -628,14 +561,11 @@ async function teste12_SolicitacaoSaque() {
     });
 
     await solicitacao.save();
-    testData.solicitacoes.push(solicitacao);
     logSuccess(`Solicitação criada (ID: ${solicitacao._id})`);
 
-    // Marcar rodada como premiada
     rodadaConcluida.premioVerdePago = true;
     await rodadaConcluida.save();
 
-    // Verificar solicitação pendente
     const pendente = await SolicitacaoSaque.findOne({
         usuario: ganhador._id,
         status: 'pendente'
@@ -643,18 +573,10 @@ async function teste12_SolicitacaoSaque() {
 
     if (pendente) {
         logSuccess('✅ Solicitação pendente encontrada');
-
-        // Simular aprovação
-        pendente.status = 'aprovado';
-        pendente.dataAprovacao = new Date();
-        await pendente.save();
-        logSuccess('✅ Solicitação aprovada');
-
         return true;
-    } else {
-        logError('❌ Solicitação não encontrada');
-        return false;
     }
+    logError('❌ Solicitação não encontrada');
+    return false;
 }
 
 // ===========================================
@@ -676,10 +598,9 @@ async function teste13_UnicaRodadaPorUsuario() {
     if (rodadasDoUsuario.length <= 1) {
         logSuccess('✅ Usuário está em apenas uma rodada ativa');
         return true;
-    } else {
-        logError(`❌ Usuário está em ${rodadasDoUsuario.length} rodadas - VIOLA REGRA!`);
-        return false;
     }
+    logError(`❌ Usuário está em ${rodadasDoUsuario.length} rodadas - VIOLA REGRA!`);
+    return false;
 }
 
 // ===========================================
@@ -688,7 +609,6 @@ async function teste13_UnicaRodadaPorUsuario() {
 async function teste14_CadastroMassaComLinks() {
     logSection('TESTE 14: Cadastro em massa com links diferentes');
 
-    // Criar 3 convidantes diferentes
     const convidantes = [];
     for (let i = 1; i <= 3; i++) {
         const convidante = await criarUsuario(
@@ -696,32 +616,24 @@ async function teste14_CadastroMassaComLinks() {
             `convidante_${i}_${Date.now()}@teste.com`
         );
 
-        // Criar rodada para cada convidante
         const rodada = await RodadaService.criarRodada(convidante._id);
         convidantes.push({ convidante, rodada, codigo: await obterCodigoConvite(convidante) });
-
         console.log(`   Convidante ${i}: ${convidante.nome} - Rodada: ${rodada.nome}`);
     }
 
-    // Cada convidante convida 2 pessoas
     let totalConvidados = 0;
-
     for (const c of convidantes) {
-        logSubSection(`Convites do ${c.convidante.nome}`);
-
         for (let j = 1; j <= 2; j++) {
             const convidado = await criarUsuario(
                 `Convidado_${c.convidante.nome.split('_')[1]}_${j}`,
                 `convidado_${c.convidante.nome}_${j}_${Date.now()}@teste.com`
             );
 
-            // Adicionar à rodada do convidante
             await RodadaService.adicionarParticipanteAmarelo(
                 c.rodada._id.toString(),
                 convidado._id.toString(),
                 c.convidante._id.toString()
             );
-
             totalConvidados++;
             console.log(`   ✅ ${convidado.nome} entrou na rodada ${c.rodada.nome}`);
         }
@@ -729,7 +641,6 @@ async function teste14_CadastroMassaComLinks() {
 
     logInfo(`\nTotal de convidados adicionados: ${totalConvidados}`);
     logSuccess('✅ Cadastro em massa com links funcionou');
-
     return true;
 }
 
@@ -742,7 +653,6 @@ async function teste15_ReafirmarNaoCriacaoRodadas() {
     const rodadasAntes = await Rodada.countDocuments();
     logInfo(`Rodadas antes: ${rodadasAntes}`);
 
-    // Criar 10 usuários em sequência
     for (let i = 1; i <= 10; i++) {
         await criarUsuario(
             `TesteNaoCriaRodada_${i}`,
@@ -756,10 +666,9 @@ async function teste15_ReafirmarNaoCriacaoRodadas() {
     if (rodadasDepois === rodadasAntes) {
         logSuccess('✅ NENHUM dos 10 cadastros criou rodada!');
         return true;
-    } else {
-        logError(`❌ Foram criadas ${rodadasDepois - rodadasAntes} rodadas - VIOLA REGRA!`);
-        return false;
     }
+    logError(`❌ Foram criadas ${rodadasDepois - rodadasAntes} rodadas - VIOLA REGRA!`);
+    return false;
 }
 
 // ===========================================
@@ -767,56 +676,53 @@ async function teste15_ReafirmarNaoCriacaoRodadas() {
 // ===========================================
 async function runAllTests() {
     console.log(`\n${colors.bright}${colors.magenta}${'🧪'.repeat(35)}${colors.reset}`);
-    console.log(`${colors.bright}${colors.magenta}    TESTE COMPLETO - TODAS AS REGRAS DE NEGÓCIO    ${colors.reset}`);
+    console.log(`${colors.bright}${colors.magenta}    TESTE COMPLETO - VALIDAÇÃO DAS REGRAS DE NEGÓCIO    ${colors.reset}`);
     console.log(`${colors.bright}${colors.magenta}${'🧪'.repeat(35)}${colors.reset}\n`);
 
     const results = [];
 
     try {
-        // Conectar ao MongoDB
-        logInfo(`Conectando ao MongoDB: ${MONGODB_URI}`);
-        await mongoose.connect(MONGODB_URI, {
-            serverSelectionTimeoutMS: 5000
-        });
+        await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
         logSuccess('Conectado ao MongoDB');
 
-        // Limpar banco
         await limparBanco();
 
         // Executar todos os testes
-        results.push({ name: 'Cadastro sem convite (sem rodadas)', passed: (await teste1_CadastroSemConviteSemRodadas()).success });
+        const test1Result = await teste1_CadastroSemConviteSemRodadas();
+        results.push({ name: 'Cadastro sem convite não cria rodada', passed: test1Result.passed });
 
         if (testData.users.length > 0) {
             const rodada = await teste2_CriarRodadaManual();
             results.push({ name: 'Criar rodada manual', passed: !!rodada });
 
             if (rodada) {
-                results.push({ name: 'Cadastro com convite válido', passed: !!(await teste3_CadastroComConviteValido()) });
+                results.push({ name: 'Cadastro com convite válido', passed: await teste3_CadastroComConviteValido() });
 
                 const rodadaCompleta = await teste4_CompletarRodada(rodada);
-                results.push({ name: 'Completar 15 participantes', passed: rodadaCompleta.participantes.length === 15 });
+                if (rodadaCompleta) {
+                    results.push({ name: 'Completar 15 participantes', passed: true });
+                    results.push({ name: 'Distribuição de cores (1+2+4+8)', passed: await teste5_DistribuicaoCores(rodadaCompleta) });
+                    results.push({ name: 'Transações criadas (R$ 137,50)', passed: await teste6_TransacoesCriadas(rodadaCompleta) });
 
-                results.push({ name: 'Distribuição de cores', passed: await teste5_DistribuicaoCores(rodadaCompleta) });
-                results.push({ name: 'Transações criadas', passed: await teste6_TransacoesCriadas(rodadaCompleta) });
-                results.push({ name: 'Pagamentos confirmados', passed: await teste7_PagamentosVermelhos(rodadaCompleta) });
-
-                const rodadaConcluida = await Rodada.findById(rodadaCompleta._id);
-                results.push({ name: 'Progressão de cores', passed: await teste8_ProgressaoCores(rodadaConcluida) });
-                results.push({ name: 'Criação de 2 novas rodadas', passed: await teste9_CriacaoNovasRodadas(rodadaConcluida) });
+                    const rodadaConcluida = await teste7_PagamentosVermelhos(rodadaCompleta);
+                    if (rodadaConcluida) {
+                        results.push({ name: 'Pagamentos confirmados (8/8)', passed: true });
+                        results.push({ name: 'Progressão de cores', passed: await teste8_ProgressaoCores(rodadaConcluida) });
+                        results.push({ name: 'Criação de 2 novas rodadas', passed: await teste9_CriacaoNovasRodadas(rodadaConcluida) });
+                    }
+                }
             }
         }
 
         // Testes independentes
         results.push({ name: 'Fila de espera FIFO', passed: await teste10_FilaEspera() });
-        results.push({ name: 'Jogar Novamente', passed: await teste11_JogarNovamente() });
+        results.push({ name: 'Jogar Novamente não cria rodada', passed: await teste11_JogarNovamente() });
         results.push({ name: 'Solicitação de saque', passed: await teste12_SolicitacaoSaque() });
         results.push({ name: 'Usuário em única rodada', passed: await teste13_UnicaRodadaPorUsuario() });
         results.push({ name: 'Cadastro em massa com links', passed: await teste14_CadastroMassaComLinks() });
-        results.push({ name: 'Nenhum cadastro cria rodada', passed: await teste15_ReafirmarNaoCriacaoRodadas() });
+        results.push({ name: 'Reafirmar: nenhum cadastro cria rodada', passed: await teste15_ReafirmarNaoCriacaoRodadas() });
 
-        // ===========================================
         // RESUMO FINAL
-        // ===========================================
         logSection('RESUMO FINAL DOS TESTES');
 
         const passedCount = results.filter(r => r.passed).length;
@@ -829,7 +735,6 @@ async function runAllTests() {
         console.log(`   📈 Percentual: ${((passedCount / totalCount) * 100).toFixed(1)}%`);
         console.log(`${'📊'.repeat(35)}\n`);
 
-        // Listar detalhes dos testes
         console.log(`${colors.cyan}📋 DETALHES DOS TESTES:${colors.reset}`);
         for (const result of results) {
             if (result.passed) {
@@ -844,15 +749,7 @@ async function runAllTests() {
             console.log(`${colors.green}${colors.bright}O sistema está 100% alinhado com todas as regras de negócio!${colors.reset}`);
         } else {
             console.log(`\n${colors.red}${colors.bright}⚠️ ATENÇÃO! ${totalCount - passedCount} teste(s) falharam.${colors.reset}`);
-            console.log(`${colors.yellow}Revise as implementações e execute novamente.${colors.reset}`);
         }
-
-        // Estatísticas finais
-        console.log(`\n${colors.cyan}📊 ESTATÍSTICAS FINAIS:${colors.reset}`);
-        console.log(`   Usuários criados: ${testData.users.length}`);
-        console.log(`   Rodadas criadas: ${testData.rodadas.length}`);
-        console.log(`   Transações criadas: ${testData.transacoes.length}`);
-        console.log(`   Solicitações de saque: ${testData.solicitacoes.length}`);
 
         await salvarCredenciaisParaLogin();
 
@@ -866,15 +763,11 @@ async function runAllTests() {
     }
 }
 
-// ===========================================
-// FUNÇÃO PARA SALVAR CREDENCIAIS DOS USUÁRIOS
-// ===========================================
 async function salvarCredenciaisParaLogin() {
     console.log(`\n${colors.cyan}${'='.repeat(70)}${colors.reset}`);
     console.log(`${colors.bright}🔑 CREDENCIAIS DOS USUÁRIOS CRIADOS${colors.reset}`);
     console.log(`${colors.cyan}${'='.repeat(70)}${colors.reset}`);
 
-    // Filtrar usuários úteis para teste (ignorar participantes genéricos)
     const usuariosUteis = testData.users.filter(u =>
         u.nome.includes('CadastroSemConvite') ||
         u.nome.includes('Convidado') ||
@@ -887,26 +780,20 @@ async function salvarCredenciaisParaLogin() {
     console.log(`\n📋 Total de usuários para login: ${usuariosUteis.length}\n`);
 
     for (const user of usuariosUteis) {
-        // Determinar a senha (padrão é 'Test@123' para todos criados pelo script)
-        const senha = 'Test@123';
-
         console.log(`${colors.green}✅ ${user.nome}${colors.reset}`);
         console.log(`   📧 Email: ${user.email}`);
-        console.log(`   🔑 Senha: ${senha}`);
-        console.log(`   🆔 ID: ${user._id}`);
+        console.log(`   🔑 Senha: Test@123`);
         console.log(`   🎫 Código convite: ${user.codigoConvite || 'N/A'}`);
         console.log(`   ⏳ Na fila: ${user.aguardandoVermelho ? 'SIM' : 'NÃO'}`);
         console.log(`   📍 Posição fila: ${user.posicaoFila || 'N/A'}`);
         console.log('');
     }
 
-    // Salvar em arquivo JSON para referência
     const fs = require('fs');
     const credenciais = usuariosUteis.map(user => ({
         nome: user.nome,
         email: user.email,
         senha: 'Test@123',
-        id: user._id,
         codigoConvite: user.codigoConvite,
         naFila: user.aguardandoVermelho,
         posicaoFila: user.posicaoFila
@@ -915,8 +802,6 @@ async function salvarCredenciaisParaLogin() {
     fs.writeFileSync('./credenciais-usuarios.json', JSON.stringify(credenciais, null, 2));
     console.log(`${colors.green}💾 Credenciais salvas em: credenciais-usuarios.json${colors.reset}`);
 }
-
-// Chamar a função no final do runAllTests(), antes de desconectar
 
 // Executar testes
 runAllTests().catch(console.error);

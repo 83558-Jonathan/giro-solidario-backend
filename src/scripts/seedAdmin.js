@@ -50,15 +50,15 @@ async function criarAdmin() {
             await admin.save();
 
             console.log(`
-    ========================================
-    ✅ ADMIN CRIADO COM SUCESSO!
-    ========================================
-    📧 Email: ${adminEmail}
-    🔑 Senha: ${adminSenha}
-    👤 Nome: ${adminNome}
-    ========================================
-    ⚠️  GUARDE ESSAS CREDENCIAIS EM LOCAL SEGURO!
-    ========================================
+                ========================================
+                ✅ ADMIN CRIADO COM SUCESSO!
+                ========================================
+                📧 Email: ${adminEmail}
+                🔑 Senha: ${adminSenha}
+                👤 Nome: ${adminNome}
+                ========================================
+                ⚠️  GUARDE ESSAS CREDENCIAIS EM LOCAL SEGURO!
+                ========================================
             `);
         }
 
