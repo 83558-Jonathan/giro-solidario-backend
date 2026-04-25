@@ -839,7 +839,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS (SOMENTE 2)
+  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS (CORRIGIDO - SEM DUPLICAÇÃO)
   // ===========================================
   async avancarRodada(rodadaId) {
     // PREVENIR PROCESSAMENTO DUPLICADO
@@ -867,7 +867,7 @@ class RodadaService {
 
       console.log(`[DEBUG] Rodada: ${rodada.nome}, Status atual: ${rodada.status}`);
 
-      // ✅ VERIFICAÇÃO ADICIONAL: Se já está concluída, não faz nada
+      // ✅ VERIFICAÇÃO: Se já está concluída, não faz nada
       if (rodada.status === 'concluida') {
         console.log(`[DEBUG] Rodada ${rodada.nome} ja esta concluida. Ignorando.`);
         return rodada;
@@ -878,7 +878,7 @@ class RodadaService {
         throw new Error('Rodada nao esta em andamento');
       }
 
-      // ✅ VERIFICAÇÃO ADICIONAL: Se já gerou rodadas, não processa novamente
+      // ✅ VERIFICAÇÃO CRÍTICA: Se já gerou rodadas, NÃO processa novamente
       if (rodada.rodadasGeradas && rodada.rodadasGeradas.length > 0) {
         console.log(`[DEBUG] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas. Ignorando.`);
         return rodada;
@@ -933,7 +933,7 @@ class RodadaService {
 
       console.log(`[DEBUG] Apos promocao: Verdes: ${novosVerdes.length}, Pretos: ${novosPretos.length}, Azuis: ${novosAzuis.length}`);
 
-      // Validar quantidade de verdes
+      // Validar quantidade de verdes (devem ser 2)
       if (novosVerdes.length !== 2) {
         console.error(`[DEBUG] ERRO: Numero de verdes insuficiente: ${novosVerdes.length}. Esperado: 2`);
         await rodada.save();
@@ -941,7 +941,7 @@ class RodadaService {
       }
 
       // ===========================================
-      // 5. CRIAR 2 NOVAS RODADAS (APENAS 2 - PROGRESSÃO)
+      // 5. CRIAR 2 NOVAS RODADAS (APENAS 2!)
       // ===========================================
       console.log(`[DEBUG] 2 verdes encontrados! Gerando 2 novas rodadas...`);
 
@@ -980,7 +980,7 @@ class RodadaService {
       console.log(`[DEBUG] Rodadas geradas com sucesso!`);
 
       // ===========================================
-      // 6. ALOCAR USUARIOS DA FILA DE ESPERA EM TODAS AS RODADAS COM VAGAS
+      // 6. ALOCAR USUARIOS DA FILA DE ESPERA
       // ===========================================
       await this.alocarFilaEmTodasRodadas();
 
@@ -1306,7 +1306,7 @@ class RodadaService {
 
       // ✅ Já gerou rodadas (proteção contra duplicação)
       if (rodada.rodadasGeradas && rodada.rodadasGeradas.length > 0) {
-        console.log(`[AUTO] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas.`);
+        console.log(`[AUTO] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas. Ignorando.`);
         return true;
       }
 
