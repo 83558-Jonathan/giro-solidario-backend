@@ -346,7 +346,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // CRIAR TRANSACAO INDIVIDUAL PARA VERMELHO (VALOR CORRETO)
+  // CRIAR TRANSACAO INDIVIDUAL PARA VERMELHO (VALOR CORRETO: R$ 150)
   // ===========================================
   async criarTransacaoParaVermelho(rodadaId, vermelhoId) {
     try {
@@ -356,8 +356,8 @@ class RodadaService {
       const verdeId = rodada.verde;
       if (!verdeId) throw new Error("Verde nao definido na rodada");
 
-      // ✅ VALOR CORRETO: R$ 125 + 10% taxa = R$ 137,50
-      const valor = 137.5;
+      // ✅ VALOR CORRETO: R$ 150,00
+      const valor = 150;
 
       const transacao = new Transacao({
         tipo: "deposito",
@@ -470,7 +470,7 @@ class RodadaService {
 
       const transacoes = [];
       const verde = rodada.verde;
-      const valor = 137.5; // ✅ VALOR CORRETO
+      const valor = 150;
       const vermelhos = rodada.vermelhos || [];
 
       if (!verde) throw new Error("Verde nao definido");
@@ -696,7 +696,9 @@ class RodadaService {
     }
   }
 
-  // Criar transacoes para TODOS os vermelhos da rodada (quando a rodada estiver completa)
+  // ===========================================
+  // CRIAR TRANSACOES PARA VERMELHOS (VALOR CORRETO: R$ 150)
+  // ===========================================
   async criarTransacoesParaVermelhos(rodadaId) {
     try {
       const rodada = await Rodada.findById(rodadaId);
@@ -718,7 +720,7 @@ class RodadaService {
       );
 
       const transacoes = [];
-      const valor = 137.5; // ✅ VALOR CORRETO
+      const valor = 150; // ✅ VALOR CORRETO: R$ 150,00
 
       for (const vermelhoId of vermelhos) {
         // Verificar se ja existe transacao para este vermelho
@@ -833,7 +835,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // ALOCAR FILA EM TODAS AS RODADAS COM VAGAS (NOVO - CORRIGIDO)
+  // ALOCAR FILA EM TODAS AS RODADAS COM VAGAS
   // ===========================================
   async alocarFilaEmTodasRodadas() {
     console.log(`\n${"=".repeat(60)}`);
@@ -988,7 +990,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS (CORRIGIDO - SEM DUPLICAÇÃO)
+  // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS
   // ===========================================
   async avancarRodada(rodadaId) {
     // PREVENIR PROCESSAMENTO DUPLICADO
@@ -1071,7 +1073,7 @@ class RodadaService {
       // ===========================================
       const verdeAtual = rodada.participantes.find((p) => p.cor === "verde");
       console.log(
-        `[DEBUG] Verde atual que ganhou R$ 900: ${verdeAtual?.usuario}`,
+        `[DEBUG] Verde atual que ganhou R$ 1000: ${verdeAtual?.usuario}`,
       );
 
       // ===========================================
@@ -1091,7 +1093,7 @@ class RodadaService {
           console.log(`   preto->verde ${p.usuario}`);
         } else if (p.cor === "verde") {
           p.cor = "concluido";
-          console.log(`   verde->concluido ${p.usuario} (ganhou R$ 900)`);
+          console.log(`   verde->concluido ${p.usuario} (ganhou R$ 1000)`);
         }
       }
 
@@ -1170,7 +1172,7 @@ class RodadaService {
         usuario: verdeAtual.usuario,
         corAnterior: "verde",
         corNova: "concluido",
-        observacao: `✅ RODADA CONCLUÍDA! Prêmio de R$ 900 disponível para saque.`,
+        observacao: `✅ RODADA CONCLUÍDA! Prêmio de R$ 1000 disponível para saque.`,
         data: new Date(),
       });
 
@@ -1181,7 +1183,7 @@ class RodadaService {
       await rodada.save();
 
       console.log(`[FINALIZACAO] Rodada ${rodada.nome} concluída com sucesso!`);
-      console.log(`   🏆 Verde vencedor ganhou R$ 900`);
+      console.log(`   🏆 Verde vencedor ganhou R$ 1000`);
       console.log(`   Novas rodadas geradas: ${rodada.rodadasGeradas.length}`);
 
       return rodada;
@@ -1468,7 +1470,7 @@ class RodadaService {
           ),
       );
 
-      const totalGanho = rodadasConcluidas.length * 900;
+      const totalGanho = rodadasConcluidas.length * 1000;
 
       // CALCULO CORRETO: Esta na fila de espera apenas se:
       // 1. Tem a flag aguardandoVermelho = true

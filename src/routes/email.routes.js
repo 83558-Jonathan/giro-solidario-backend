@@ -28,7 +28,7 @@ router.post('/teste-premio/:usuarioId', async (req, res) => {
             return res.status(400).json({ success: false, error: 'rodadaId é obrigatório' });
         }
 
-        await emailController.notificarPremioVerde(usuarioId, rodadaId, valor || 900);
+        await emailController.notificarPremioVerde(usuarioId, rodadaId, valor || 1000);
         res.json({ success: true, message: 'Email de teste enviado com sucesso' });
     } catch (error) {
         console.error('❌ Erro ao enviar email de teste:', error);

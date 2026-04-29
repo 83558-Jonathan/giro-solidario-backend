@@ -15,7 +15,7 @@ const solicitacaoSaqueSchema = new mongoose.Schema({
     valor: {
         type: Number,
         required: true,
-        default: 900
+        default: 1000
     },
     chavePix: {
         type: String,
