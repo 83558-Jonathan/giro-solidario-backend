@@ -471,7 +471,9 @@ class RodadaService {
       const transacoes = [];
       const verde = rodada.verde;
       const valor = 150;
-      const vermelhos = rodada.vermelhos || [];
+      const vermelhos = rodada.participantes.filter(
+        (p) => p.cor === "vermelho",
+      );
 
       if (!verde) throw new Error("Verde nao definido");
       if (vermelhos.length === 0) throw new Error("Vermelhos nao definidos");
@@ -707,7 +709,11 @@ class RodadaService {
       const verdeId = rodada.verde;
       if (!verdeId) throw new Error("Verde nao definido na rodada");
 
-      const vermelhos = rodada.vermelhos || [];
+      // 🔥 CORREÇÃO: Buscar vermelhos pelos participantes, NÃO pelo array vermelhos
+      const vermelhos = rodada.participantes.filter(
+        (p) => p.cor === "vermelho",
+      );
+
       if (vermelhos.length === 0) {
         console.log(
           `Nenhum vermelho para criar transacoes na rodada ${rodada.nome}`,
@@ -722,7 +728,9 @@ class RodadaService {
       const transacoes = [];
       const valor = 150; // ✅ VALOR CORRETO: R$ 150,00
 
-      for (const vermelhoId of vermelhos) {
+      for (const participante of vermelhos) {
+        const vermelhoId = participante.usuario;
+
         // Verificar se ja existe transacao para este vermelho
         const existe = await Transacao.findOne({
           pagador: vermelhoId,
@@ -743,11 +751,11 @@ class RodadaService {
           transacoes.push(transacao);
 
           // Associar transacao ao participante
-          const participante = rodada.participantes.find(
-            (p) => p.usuario.toString() === vermelhoId.toString(),
-          );
-          if (participante) {
-            participante.transacaoId = transacao._id;
+          participante.transacaoId = transacao._id;
+
+          // Garantir que o array vermelhos também tenha o ID (para consistência)
+          if (!rodada.vermelhos.includes(vermelhoId)) {
+            rodada.vermelhos.push(vermelhoId);
           }
 
           console.log(
@@ -988,7 +996,6 @@ class RodadaService {
 
     return alocados;
   }
-
   // ===========================================
   // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS
   // ===========================================
@@ -1094,6 +1101,23 @@ class RodadaService {
         } else if (p.cor === "verde") {
           p.cor = "concluido";
           console.log(`   verde->concluido ${p.usuario} (ganhou R$ 1000)`);
+
+          // 🔥 🔥 🔥 CORREÇÃO ADICIONADA 🔥 🔥 🔥
+          // Adicionar saldo ao usuário que ganhou o prêmio
+          try {
+            await User.findByIdAndUpdate(p.usuario, {
+              $inc: {
+                saldoPremio: 1000,
+                totalGanho: 1000,
+              },
+            });
+            console.log(
+              `   💰 Prêmio de R$ 1.000 creditado ao usuário ${p.usuario}`,
+            );
+          } catch (err) {
+            console.error(`   ❌ Erro ao creditar prêmio: ${err.message}`);
+          }
+          // =========================================
         }
       }
 
@@ -1583,7 +1607,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // JOGAR NOVAMENTE (usuario que ganhou quer voltar como vermelho)
+  // JOGAR NOVAMENTE (usuario que ganhou quer voltar como vermelho) - COM SALDO E FILA
   // ===========================================
   async jogarNovamente(usuarioId) {
     try {
@@ -1593,6 +1617,12 @@ class RodadaService {
       if (!usuario) {
         throw new Error("Usuario nao encontrado");
       }
+
+      console.log(`💰 Saldo de prêmio atual: R$ ${usuario.saldoPremio || 0}`);
+      console.log(
+        `⏳ Aguardando vermelho: ${usuario.aguardandoVermelho || false}`,
+      );
+      console.log(`📍 Posição na fila: ${usuario.posicaoFila || "nenhuma"}`);
 
       // Verificar se o usuario tem alguma solicitacao PENDENTE
       const SolicitacaoSaque = require("../models/SolicitacaoSaque");
@@ -1607,16 +1637,22 @@ class RodadaService {
         );
       }
 
-      // Verificar se ja esta em alguma rodada
+      // Verificar se ja esta em alguma rodada ativa
       const rodadaAtiva = await this.buscarRodadaAtivaDoUsuario(usuarioId);
-      const rodadaEmAndamento =
-        await this.buscarRodadaParaNovoVermelho(usuarioId);
-
-      if (rodadaAtiva || rodadaEmAndamento) {
+      if (rodadaAtiva) {
         throw new Error("Voce ja esta participando de uma rodada ativa");
       }
 
-      // Buscar rodada com vaga para vermelho
+      // 🔥 VERIFICAR SE TEM SALDO PARA PAGAR AUTOMATICAMENTE
+      const temSaldo = (usuario.saldoPremio || 0) >= 150;
+      let pagoAutomaticamente = false;
+      let saldoRestante = usuario.saldoPremio || 0;
+
+      // ===========================================
+      // BUSCAR RODADA COM VAGA PARA VERMELHO
+      // ===========================================
+
+      // PRIORIDADE 1: Rodadas em_andamento com vagas
       let rodadaParaEntrar = await Rodada.findOne({
         status: "em_andamento",
         $expr: {
@@ -1635,6 +1671,7 @@ class RodadaService {
         },
       }).sort({ createdAt: 1 });
 
+      // PRIORIDADE 2: Rodadas aguardando que JÁ TEM estrutura (rodadas filhas)
       if (!rodadaParaEntrar) {
         rodadaParaEntrar = await Rodada.findOne({
           status: "aguardando",
@@ -1658,27 +1695,147 @@ class RodadaService {
         }).sort({ createdAt: 1 });
       }
 
+      // ===========================================
+      // CASO 1: ENCONTROU RODADA COM VAGA
+      // ===========================================
       if (rodadaParaEntrar) {
+        console.log(`✅ Rodada encontrada: ${rodadaParaEntrar.nome}`);
+
+        // Verificar se o usuário já não está na fila (limpar sujeira)
+        if (usuario.aguardandoVermelho) {
+          console.log(
+            `⚠️ Usuário estava na fila. Removendo da fila antes de entrar na rodada...`,
+          );
+          usuario.aguardandoVermelho = false;
+          usuario.posicaoFila = null;
+          usuario.dataEntradaFila = null;
+          await usuario.save();
+        }
+
+        // Adicionar como VERMELHO
         await this.adicionarParticipanteVermelho(
           rodadaParaEntrar._id.toString(),
           usuarioId,
           null,
         );
 
+        // 🔥 SE TEM SALDO, MARCAR COMO PAGO AUTOMATICAMENTE
+        if (temSaldo) {
+          console.log(
+            `💰 Usuário tem saldo de R$ ${saldoRestante}. Aplicando pagamento automático...`,
+          );
+
+          // Buscar a transação criada
+          const transacao = await Transacao.findOne({
+            pagador: usuarioId,
+            rodada: rodadaParaEntrar._id,
+            status: "pendente",
+          });
+
+          if (transacao) {
+            // Marcar transação como confirmada
+            transacao.status = "confirmado";
+            transacao.dataConfirmacao = new Date();
+            transacao.metadata = {
+              ...(transacao.metadata || {}),
+              pagoComSaldo: true,
+              saldoAnterior: saldoRestante,
+              valorDescontado: 150,
+            };
+            await transacao.save();
+
+            // Atualizar participante na rodada
+            const rodadaAtualizada = await Rodada.findById(
+              rodadaParaEntrar._id,
+            );
+            const participante = rodadaAtualizada.participantes.find(
+              (p) => p.usuario.toString() === usuarioId,
+            );
+            if (participante) {
+              participante.depositoConfirmado = true;
+              participante.dataDeposito = new Date();
+              participante.comprovantePix = "PAGO_COM_SALDO";
+            }
+
+            // Contar vermelhos pagos
+            const vermelhos = rodadaAtualizada.participantes.filter(
+              (p) => p.cor === "vermelho",
+            );
+            const vermelhosPagos = vermelhos.filter(
+              (v) => v.depositoConfirmado === true,
+            );
+            rodadaAtualizada.totalDepositosConfirmados = vermelhosPagos.length;
+
+            await rodadaAtualizada.save();
+
+            // Descontar do saldo do usuário
+            const novoSaldo = saldoRestante - 150;
+            await User.findByIdAndUpdate(usuarioId, {
+              $set: { saldoPremio: novoSaldo },
+            });
+
+            pagoAutomaticamente = true;
+            saldoRestante = novoSaldo;
+
+            console.log(
+              `✅ Pagamento automático realizado! Saldo restante: R$ ${saldoRestante}`,
+            );
+
+            // Verificar se a rodada completou todos os pagamentos
+            if (vermelhosPagos.length === vermelhos.length) {
+              await this.verificarEAvancarSeNecessario(rodadaParaEntrar._id);
+            }
+          }
+        }
+
         // Retorno para quando entra em rodada
+        const message = pagoAutomaticamente
+          ? `✅ Você foi adicionado como VERMELHO na ${rodadaParaEntrar.nome}! Seu pagamento de R$ 150 foi descontado do seu saldo. Saldo restante: R$ ${saldoRestante}.`
+          : `✅ Você foi adicionado como VERMELHO na ${rodadaParaEntrar.nome}! Gere o QR Code para pagar R$ 150.`;
+
         return {
-          message: `Você foi adicionado como VERMELHO na ${rodadaParaEntrar.nome}!`,
+          success: true,
+          message,
           cor: "vermelho",
           rodadaId: rodadaParaEntrar._id,
+          rodadaNome: rodadaParaEntrar.nome,
           aguardando: false,
+          pagoAutomaticamente,
+          saldoRestante,
         };
       }
 
       // ===========================================
-      // Se nao tem rodada disponivel, colocar na fila de espera
+      // CASO 2: NÃO ENCONTROU RODADA COM VAGA
       // ===========================================
+      console.log(
+        `❌ Nenhuma rodada com vaga encontrada. Colocando na FILA DE ESPERA...`,
+      );
 
-      // Buscar próxima posição na fila
+      // Verificar se o usuário JÁ está na fila
+      if (usuario.aguardandoVermelho) {
+        console.log(
+          `⚠️ Usuário já está na fila. Posição atual: ${usuario.posicaoFila}`,
+        );
+
+        // Contar total na fila
+        const totalNaFila = await User.countDocuments({
+          aguardandoVermelho: true,
+        });
+
+        return {
+          success: true,
+          message: `⏳ Você já está na fila de espera! Posição: ${usuario.posicaoFila} de ${totalNaFila}. Aguarde uma vaga para VERMELHO.`,
+          cor: "amarelo",
+          aguardando: true,
+          posicao: usuario.posicaoFila,
+          totalNaFila,
+          pagoAutomaticamente: false,
+          saldoRestante,
+        };
+      }
+
+      // Buscar a MAIOR posição atual na fila
       const ultimoNaFila = await User.findOne({
         aguardandoVermelho: true,
       }).sort({ posicaoFila: -1 });
@@ -1690,19 +1847,28 @@ class RodadaService {
         aguardandoVermelho: true,
       });
 
+      // Adicionar à fila de espera
       usuario.aguardandoVermelho = true;
       usuario.posicaoFila = novaPosicao;
       usuario.dataEntradaFila = new Date();
       await usuario.save();
 
+      console.log(`✅ Usuário adicionado à fila! Posição: ${novaPosicao}`);
+
       // Retorno para quando vai para fila
       return {
-        message:
-          "Nenhuma rodada disponível no momento. Você foi colocado na FILA DE ESPERA e será avisado quando houver vaga.",
+        success: true,
+        message: `⏳ Nenhuma rodada disponível no momento. Você foi colocado na FILA DE ESPERA na posição ${novaPosicao} de ${totalNaFila + 1}. Quando uma nova rodada abrir, você será automaticamente alocado como VERMELHO.${
+          temSaldo
+            ? ` Seu saldo de R$ ${saldoRestante} será usado automaticamente para pagar o investimento quando for alocado.`
+            : ""
+        }`,
         cor: "amarelo",
         aguardando: true,
         posicao: novaPosicao,
         totalNaFila: totalNaFila + 1,
+        pagoAutomaticamente: false,
+        saldoRestante,
       };
     } catch (error) {
       console.error("Erro ao jogar novamente:", error);

@@ -312,6 +312,12 @@ exports.jogarNovamente = async (req, res) => {
     if (result.rodadaId) {
       response.rodadaId = result.rodadaId;
     }
+    if (result.pagoAutomaticamente !== undefined) {
+      response.pagoAutomaticamente = result.pagoAutomaticamente;
+    }
+    if (result.saldoRestante !== undefined) {
+      response.saldoRestante = result.saldoRestante;
+    }
 
     res.json(response);
   } catch (error) {
@@ -324,7 +330,7 @@ exports.jogarNovamente = async (req, res) => {
 };
 
 // ===========================================
-// SACAR PRÊMIO DO VERDE (CORRIGIDO)
+// SACAR PRÊMIO DO VERDE (CORRIGIDO COM ADIÇÃO DE SALDO)
 // ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
@@ -372,7 +378,7 @@ exports.sacarPremio = async (req, res) => {
         .json({ success: false, error: "Esta rodada ainda não foi concluída" });
     }
 
-    // ✅ CORREÇÃO: Converter ambos para string para comparação segura
+    // Converter ambos para string para comparação segura
     const verdeIdStr = rodada.verde?.toString
       ? rodada.verde.toString()
       : String(rodada.verde);
@@ -394,7 +400,6 @@ exports.sacarPremio = async (req, res) => {
       console.log(`   Participante concluído encontrado: NÃO ❌`);
     }
 
-    // Listar todos os participantes com cor 'concluido' para debug
     const todosConcluidos =
       rodada.participantes?.filter((p) => p.cor === "concluido") || [];
     console.log(`\n📋 PARTICIPANTES COM COR 'concluido' (ganhadores):`);
@@ -437,7 +442,11 @@ exports.sacarPremio = async (req, res) => {
     console.log(`   Email: ${usuario.email}`);
     console.log(`   Chave PIX: ${usuario.chavePix}`);
     console.log(`   Tipo Chave PIX: ${usuario.tipoChavePix}`);
+    console.log(`   Saldo prêmio atual: R$ ${usuario.saldoPremio || 0}`);
 
+    // ===========================================
+    // 🔥 CRIAR SOLICITAÇÃO DE SAQUE
+    // ===========================================
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,
       rodada: rodadaId,
@@ -451,6 +460,14 @@ exports.sacarPremio = async (req, res) => {
     await solicitacao.save();
     console.log(`✅ Solicitação de saque criada (ID: ${solicitacao._id})`);
 
+    // ===========================================
+    // 🔥 ADICIONAR SALDO AO USUÁRIO (para usar como crédito)
+    // ===========================================
+    await User.findByIdAndUpdate(usuarioId, {
+      $inc: { saldoPremio: 1000 },
+    });
+    console.log(`✅ Adicionado R$ 1.000 ao saldo de prêmio do usuário`);
+
     // Marcar que já foi solicitado (evita duplicidade)
     await db
       .collection("rodadas")
@@ -462,6 +479,9 @@ exports.sacarPremio = async (req, res) => {
 
     console.log(
       `\n💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`,
+    );
+    console.log(
+      `💰 Saldo de prêmio atualizado para R$ ${(usuario.saldoPremio || 0) + 1000}`,
     );
     console.log("=".repeat(60) + "\n");
 

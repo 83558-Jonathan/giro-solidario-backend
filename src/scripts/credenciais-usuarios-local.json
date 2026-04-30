@@ -2,281 +2,537 @@
   {
     "nome": "Administrador Master",
     "email": "admin@giropremiados.com.br",
-    "senha": "Teste@123",
+    "senha": "Admin@123",
+    "tipo": "ADMIN",
     "codigoConvite": "CONVITE-ADMIN-MASTER",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "preto",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_2",
-    "email": "part_2_1777093165465@teste.com",
+    "email": "part_2_1777566385435@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-LRBBNOBK",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-4D30JRRQ",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "preto",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_3",
-    "email": "part_3_1777093165559@teste.com",
+    "email": "part_3_1777566385538@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-BL7Y8ES5",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-6W9PPCC5",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_4",
-    "email": "part_4_1777093165642@teste.com",
+    "email": "part_4_1777566385613@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-6CLIBSFR",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-ADX3RULY",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_5",
-    "email": "part_5_1777093165732@teste.com",
+    "email": "part_5_1777566385704@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-G3OSCLN8",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-COK5FL4O",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "concluido",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_6",
-    "email": "part_6_1777093165813@teste.com",
+    "email": "part_6_1777566385809@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-AUAIHDMS",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-WL95P3MQ",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "verde",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_7",
-    "email": "part_7_1777093165879@teste.com",
+    "email": "part_7_1777566385879@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-4ONATI2U",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-ASAPW9AD",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "verde",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_8",
-    "email": "part_8_1777093165945@teste.com",
+    "email": "part_8_1777566385944@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-VK5FF130",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-F3ODRL9A",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_9",
-    "email": "part_9_1777093166019@teste.com",
+    "email": "part_9_1777566386018@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-AMGH1GWW",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-MMJKYNYT",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_10",
-    "email": "part_10_1777093166088@teste.com",
+    "email": "part_10_1777566386088@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-4PFEL68A",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-OZ8LEODA",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "preto",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "Participante_11",
-    "email": "part_11_1777093166162@teste.com",
+    "email": "part_11_1777566386162@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-6MQU1D6K",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-HIHQ8YKV",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_12",
-    "email": "part_12_1777093166231@teste.com",
+    "email": "part_12_1777566386229@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-SNA46BD9",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-7WS845TP",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_13",
-    "email": "part_13_1777093166316@teste.com",
+    "email": "part_13_1777566386289@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-O07KK95E",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-TO9MX4LQ",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_14",
-    "email": "part_14_1777093166385@teste.com",
+    "email": "part_14_1777566386353@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-NZ06HHIX",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-BJ0BHA77",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "azul",
+      "status": "concluida",
+      "depositoConfirmado": true
+    }
   },
   {
     "nome": "Participante_15",
-    "email": "part_15_1777093166447@teste.com",
+    "email": "part_15_1777566386416@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-FXEQ68W3",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-91V15TYW",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b19021fd6660acc66e",
+      "rodadaNome": "Rodada #1",
+      "cor": "preto",
+      "status": "concluida",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_1",
-    "email": "filauser_1_1777093166657@teste.com",
+    "email": "filauser_1_1777566386622@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-R33HFNVN",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-1Z3Y96F2",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_2",
-    "email": "filauser_2_1777093166714@teste.com",
+    "email": "filauser_2_1777566386680@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-RG9C2BNE",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-6NJ3F0W1",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_3",
-    "email": "filauser_3_1777093166771@teste.com",
+    "email": "filauser_3_1777566386735@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-9RBEU31J",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-XAJ333MO",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_4",
-    "email": "filauser_4_1777093166827@teste.com",
+    "email": "filauser_4_1777566386791@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-DZCCNTZL",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-0L6CIATO",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_5",
-    "email": "filauser_5_1777093166884@teste.com",
+    "email": "filauser_5_1777566386846@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-PDR60L80",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-ALFF4RB4",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_6",
-    "email": "filauser_6_1777093166941@teste.com",
+    "email": "filauser_6_1777566386901@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-43C0BFMA",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-K6CWM3HA",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_7",
-    "email": "filauser_7_1777093166997@teste.com",
+    "email": "filauser_7_1777566386958@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-3LWDEDVM",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-GADR6H18",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_8",
-    "email": "filauser_8_1777093167053@teste.com",
+    "email": "filauser_8_1777566387015@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-01IPY3LC",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-N3PYUS52",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc92d",
+      "rodadaNome": "Rodada #2",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_9",
-    "email": "filauser_9_1777093167109@teste.com",
+    "email": "filauser_9_1777566387074@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-XRZ84YQC",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-W8HJ16YE",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_10",
-    "email": "filauser_10_1777093167165@teste.com",
+    "email": "filauser_10_1777566387129@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-MCM2637F",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-F05GHJSS",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_11",
-    "email": "filauser_11_1777093167220@teste.com",
+    "email": "filauser_11_1777566387186@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-CKK6J413",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-DUIME5YP",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_12",
-    "email": "filauser_12_1777093167277@teste.com",
+    "email": "filauser_12_1777566387240@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-YUQ44L0T",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-KL25JDM6",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_13",
-    "email": "filauser_13_1777093167331@teste.com",
+    "email": "filauser_13_1777566387294@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-06MS44VF",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-OY7ZT24A",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_14",
-    "email": "filauser_14_1777093167386@teste.com",
+    "email": "filauser_14_1777566387349@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-2ULVKI0E",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-2S3I1FHA",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_15",
-    "email": "filauser_15_1777093167441@teste.com",
+    "email": "filauser_15_1777566387404@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-HHNTO6UK",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-XRSKIKDR",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_16",
-    "email": "filauser_16_1777093167496@teste.com",
+    "email": "filauser_16_1777566387458@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-8QNZAFR5",
+    "tipo": "PARTICIPANTE",
+    "codigoConvite": "CONVITE-ISYDWKLS",
     "naFila": false,
-    "posicaoFila": null
+    "posicaoFila": null,
+    "rodada": {
+      "rodadaId": "69f382b29021fd6660acc936",
+      "rodadaNome": "Rodada #3",
+      "cor": "vermelho",
+      "status": "em_andamento",
+      "depositoConfirmado": false
+    }
   },
   {
     "nome": "FilaUser_17",
-    "email": "filauser_17_1777093167554@teste.com",
+    "email": "filauser_17_1777566387516@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-D4TUJEVL",
+    "tipo": "FILA",
+    "codigoConvite": "CONVITE-AKM9FM2M",
     "naFila": true,
-    "posicaoFila": 17
+    "posicaoFila": 17,
+    "rodada": null
   },
   {
     "nome": "FilaUser_18",
-    "email": "filauser_18_1777093167608@teste.com",
+    "email": "filauser_18_1777566387572@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-L0RS0TG8",
+    "tipo": "FILA",
+    "codigoConvite": "CONVITE-TIFF4953",
     "naFila": true,
-    "posicaoFila": 18
+    "posicaoFila": 18,
+    "rodada": null
   },
   {
     "nome": "FilaUser_19",
-    "email": "filauser_19_1777093167665@teste.com",
+    "email": "filauser_19_1777566387627@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-QRY7MMAJ",
+    "tipo": "FILA",
+    "codigoConvite": "CONVITE-T3CJS1UQ",
     "naFila": true,
-    "posicaoFila": 19
+    "posicaoFila": 19,
+    "rodada": null
   },
   {
     "nome": "FilaUser_20",
-    "email": "filauser_20_1777093167721@teste.com",
+    "email": "filauser_20_1777566387683@teste.com",
     "senha": "Teste@123",
-    "codigoConvite": "CONVITE-KB4686WP",
+    "tipo": "FILA",
+    "codigoConvite": "CONVITE-NH1MHSXG",
     "naFila": true,
-    "posicaoFila": 20
+    "posicaoFila": 20,
+    "rodada": null
   }
 ]

@@ -265,25 +265,8 @@ async function testarRegra4_ValorCorreto() {
 async function testarRegra5_FilaEsperaFIFO() {
   logSection("REGRA 5: Fila de espera FIFO");
 
-  await Rodada.deleteMany({
-    nome: { $nin: ["Rodada #2", "Rodada #3"] },
-  });
-
-  for (let i = 1; i <= 20; i++) {
-    const usuario = await criarUsuario(
-      `FilaUser_${i}`,
-      `filauser_${i}_${Date.now()}@teste.com`,
-    );
-    usuario.aguardandoVermelho = true;
-    usuario.posicaoFila = i;
-    usuario.dataEntradaFila = new Date();
-    await usuario.save();
-  }
-
-  const totalNaFila = await User.countDocuments({ aguardandoVermelho: true });
-  logInfo(`${totalNaFila} usuários na fila (posições 1 a ${totalNaFila})`);
-
-  const rodadasComVagas = await Rodada.find({
+  // Buscar rodadas que já existem com estrutura (rodadas #2 e #3)
+  let rodadasComVagas = await Rodada.find({
     status: "aguardando",
     verde: { $ne: null },
     pretos: { $ne: [] },
@@ -303,6 +286,64 @@ async function testarRegra5_FilaEsperaFIFO() {
       ],
     },
   });
+
+  // Se não houver rodadas com estrutura, criar rodadas para teste
+  if (rodadasComVagas.length === 0) {
+    logInfo(
+      "Nenhuma rodada com estrutura encontrada. Criando rodadas de teste...",
+    );
+
+    const admin = await criarAdmin();
+
+    // Criar rodada #2
+    const rodada2 = await RodadaService.criarRodada(admin._id);
+    for (let i = 1; i <= 14; i++) {
+      const usuario = await criarUsuario(
+        `TesteFila_${i}`,
+        `teste_fila_${i}_${Date.now()}@teste.com`,
+      );
+      await RodadaService.adicionarParticipanteAmarelo(
+        rodada2._id,
+        usuario._id,
+        admin._id,
+      );
+    }
+
+    // Criar rodada #3
+    const rodada3 = await RodadaService.criarRodada(admin._id);
+    for (let i = 1; i <= 14; i++) {
+      const usuario = await criarUsuario(
+        `TesteFila2_${i}`,
+        `teste_fila2_${i}_${Date.now()}@teste.com`,
+      );
+      await RodadaService.adicionarParticipanteAmarelo(
+        rodada3._id,
+        usuario._id,
+        admin._id,
+      );
+    }
+
+    rodadasComVagas = await Rodada.find({
+      status: "aguardando",
+      verde: { $ne: null },
+      pretos: { $ne: [] },
+      azuis: { $ne: [] },
+    }).sort({ createdAt: 1 });
+  }
+
+  for (let i = 1; i <= 20; i++) {
+    const usuario = await criarUsuario(
+      `FilaUser_${i}`,
+      `filauser_${i}_${Date.now()}@teste.com`,
+    );
+    usuario.aguardandoVermelho = true;
+    usuario.posicaoFila = i;
+    usuario.dataEntradaFila = new Date();
+    await usuario.save();
+  }
+
+  const totalNaFila = await User.countDocuments({ aguardandoVermelho: true });
+  logInfo(`${totalNaFila} usuários na fila (posições 1 a ${totalNaFila})`);
 
   let totalVagas = 0;
   for (const rodada of rodadasComVagas) {
@@ -642,23 +683,20 @@ async function testarRegra10_SaqueEReativacao() {
 }
 
 // ===========================================
-// REGRA 11: CONVITE FUNCIONA (NOVO TESTE)
+// REGRA 11: CONVITE FUNCIONA
 // ===========================================
 async function testarRegra11_ConviteFunciona() {
   logSection("REGRA 11: Convite funciona corretamente");
 
   const admin = await criarAdmin();
 
-  // Criar usuário que será o convidante
   const convidante = await criarUsuario(
     "Convidante",
     `convidante_${Date.now()}@teste.com`,
   );
 
-  // Criar rodada para o convidante (garantir que ele tenha uma rodada)
   const rodadaConvidante = await RodadaService.criarRodada(convidante._id);
 
-  // Adicionar mais 14 participantes para completar a rodada e iniciar
   for (let i = 1; i <= 14; i++) {
     const usuario = await criarUsuario(
       `ConvConvite_${i}`,
@@ -671,31 +709,25 @@ async function testarRegra11_ConviteFunciona() {
     );
   }
 
-  // Aguardar a rodada iniciar e distribuir cores
   const rodadaIniciada = await Rodada.findById(rodadaConvidante._id);
-  
-  // Verificar se o convidante é VERMELHO (ou outra cor) e obter seu código
+
   const participanteConvidante = rodadaIniciada.participantes.find(
     (p) => p.usuario.toString() === convidante._id.toString(),
   );
 
   logInfo(`Convidante está na rodada como: ${participanteConvidante?.cor}`);
 
-  // Criar novo usuário com código de convite
   const convidado = await criarUsuario(
     "Convidado",
     `convidado_${Date.now()}@teste.com`,
   );
-  
-  // Simular registro com convite (usando o código do convidante)
+
   const codigoConvite = convidante.codigoConvite;
-  
-  // Simular a função de registro com convite (manual)
+
   convidado.indicadoPor = convidante._id;
   convidado.aguardandoVermelho = false;
   await convidado.save();
 
-  // Atualizar indicações do convidante
   await User.findByIdAndUpdate(convidante._id, {
     $push: { meusIndicados: convidado._id },
     $inc: { totalIndicacoes: 1 },
@@ -704,14 +736,15 @@ async function testarRegra11_ConviteFunciona() {
   logInfo(`Convite usado: ${codigoConvite}`);
   logInfo(`Convidado: ${convidado.nome} indicado por ${convidante.nome}`);
 
-  // Verificar se a indicação foi registrada
   const convidanteAtualizado = await User.findById(convidante._id);
   const indicacaoRegistrada = convidanteAtualizado.meusIndicados.some(
     (id) => id.toString() === convidado._id.toString(),
   );
 
   if (indicacaoRegistrada) {
-    logSuccess(`✅ Convite funcionou: ${convidante.nome} indicou ${convidado.nome}`);
+    logSuccess(
+      `✅ Convite funcionou: ${convidante.nome} indicou ${convidado.nome}`,
+    );
     return true;
   }
   logError("❌ Convite não foi registrado corretamente");
@@ -719,24 +752,20 @@ async function testarRegra11_ConviteFunciona() {
 }
 
 // ===========================================
-// REGRA 12: AZUL PODE CAPTAR (NOVO TESTE)
+// REGRA 12: AZUL PODE CAPTAR
 // ===========================================
 async function testarRegra12_AzulPodeCaptar() {
   logSection("REGRA 12: AZUL pode captar (trazer 2 pessoas)");
 
   const admin = await criarAdmin();
 
-  // Criar rodada
   const rodada = await RodadaService.criarRodada(admin._id);
 
-  // Adicionar 14 participantes
-  const participantes = [];
   for (let i = 1; i <= 14; i++) {
     const usuario = await criarUsuario(
       `Captacao_${i}`,
       `captacao_${i}_${Date.now()}@teste.com`,
     );
-    participantes.push(usuario);
     await RodadaService.adicionarParticipanteAmarelo(
       rodada._id,
       usuario._id,
@@ -744,10 +773,8 @@ async function testarRegra12_AzulPodeCaptar() {
     );
   }
 
-  // Aguardar rodada iniciar e distribuir cores
   const rodadaIniciada = await Rodada.findById(rodada._id);
-  
-  // Encontrar um participante que seja AZUL
+
   const participanteAzul = rodadaIniciada.participantes.find(
     (p) => p.cor === "azul",
   );
@@ -759,18 +786,18 @@ async function testarRegra12_AzulPodeCaptar() {
 
   logInfo(`Participante AZUL encontrado: ${participanteAzul.usuario}`);
 
-  // Contar quantos indicados ele já tem na rodada
   const indicadosNaRodada = rodadaIniciada.participantes.filter(
     (p) => p.indicadoPor?.toString() === participanteAzul.usuario.toString(),
   );
 
   logInfo(`Indicados na rodada: ${indicadosNaRodada.length}/2`);
 
-  // Verificar se pode adicionar (deve ser < 2)
   const podeAdicionar = indicadosNaRodada.length < 2;
 
   if (podeAdicionar) {
-    logSuccess(`✅ AZUL pode captar (já trouxe ${indicadosNaRodada.length} de 2)`);
+    logSuccess(
+      `✅ AZUL pode captar (já trouxe ${indicadosNaRodada.length} de 2)`,
+    );
     return true;
   }
   logError(`❌ AZUL não deveria poder captar mais (já trouxe 2)`);
@@ -778,14 +805,13 @@ async function testarRegra12_AzulPodeCaptar() {
 }
 
 // ===========================================
-// REGRA 13: EMAIL COM QR CODE É ENVIADO (NOVO TESTE)
+// REGRA 13: EMAIL COM QR CODE É ENVIADO
 // ===========================================
 async function testarRegra13_EmailQrCodeEnviado() {
   logSection("REGRA 13: Email com QR Code é enviado para o vermelho");
 
   const admin = await criarAdmin();
 
-  // Criar rodada e completar 15 participantes para gerar transações
   const rodada = await RodadaService.criarRodada(admin._id);
 
   for (let i = 1; i <= 14; i++) {
@@ -800,23 +826,20 @@ async function testarRegra13_EmailQrCodeEnviado() {
     );
   }
 
-  // Buscar transações criadas
   const transacoes = await Transacao.find({ rodada: rodada._id });
-  
+
   if (transacoes.length === 0) {
     logWarning("⚠️ Nenhuma transação encontrada para testar email");
     return false;
   }
 
-  // Mock do envio de email
   let emailEnviado = false;
   let emailDestinatario = null;
   let emailAssunto = null;
 
-  const originalEnviarEmailQrCodePix = require("../controllers/emailController")
-    .enviarEmailQrCodePix;
+  const originalEnviarEmailQrCodePix =
+    require("../controllers/emailController").enviarEmailQrCodePix;
 
-  // Substituir função para capturar chamada
   require("../controllers/emailController").enviarEmailQrCodePix = async (
     usuario,
     transacao,
@@ -834,18 +857,12 @@ async function testarRegra13_EmailQrCodeEnviado() {
   };
 
   try {
-    // Chamar criação de QR Code para uma transação
     const pixController = require("../controllers/pixController");
     const mockReq = { body: { transacaoId: transacoes[0]._id.toString() } };
-    let mockResData = null;
-    const mockRes = {
-      json: (data) => {
-        mockResData = data;
-      },
+    await pixController.criarCobrancaPix(mockReq, {
+      json: (data) => {},
       status: (code) => ({ json: (data) => {} }),
-    };
-
-    await pixController.criarCobrancaPix(mockReq, mockRes);
+    });
 
     if (emailEnviado) {
       logSuccess(`✅ Email com QR Code foi enviado para ${emailDestinatario}`);
@@ -859,10 +876,285 @@ async function testarRegra13_EmailQrCodeEnviado() {
     logError(`❌ Erro no teste de email: ${error.message}`);
     return false;
   } finally {
-    // Restaurar função original
     require("../controllers/emailController").enviarEmailQrCodePix =
       originalEnviarEmailQrCodePix;
   }
+}
+
+// ===========================================
+// REGRA 14: JOGAR NOVAMENTE COM SALDO
+// ===========================================
+async function testarRegra14_JogarNovamenteComSaldo() {
+  logSection("REGRA 14: Jogar Novamente - Com Saldo e Fila de Espera");
+
+  const admin = await criarAdmin();
+
+  // ===========================================
+  // PARTE 1: Criar um ganhador com saldo
+  // ===========================================
+  logInfo("Parte 1: Criando rodada para gerar um ganhador com saldo...");
+
+  const rodadaInicial = await RodadaService.criarRodada(admin._id);
+
+  // Adicionar participantes para completar a rodada
+  const participantes = [];
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Parte1_${i}`,
+      `parte1_${i}_${Date.now()}@teste.com`,
+    );
+    participantes.push(usuario);
+    await RodadaService.adicionarParticipanteAmarelo(
+      rodadaInicial._id,
+      usuario._id,
+      admin._id,
+    );
+  }
+
+  // Encontrar quem será o VERDE (ganhador)
+  const rodadaIniciada = await Rodada.findById(rodadaInicial._id);
+  const ganhadorId = rodadaIniciada.verde;
+  const ganhador = await User.findById(ganhadorId);
+
+  logInfo(`Ganhador identificado: ${ganhador?.nome || ganhadorId}`);
+
+  // Pagar todos os vermelhos para concluir a rodada
+  const transacoes = await Transacao.find({ rodada: rodadaInicial._id });
+  for (let i = 0; i < transacoes.length; i++) {
+    await RodadaService.confirmarDeposito(
+      transacoes[i]._id.toString(),
+      `comprovante_${i}.png`,
+      admin._id.toString(),
+    );
+  }
+
+  const rodadaConcluida = await Rodada.findById(rodadaInicial._id);
+  logInfo(`Rodada concluída: ${rodadaConcluida.status}`);
+
+  // Verificar saldo do ganhador (deve ter R$ 1000)
+  const ganhadorAtualizado = await User.findById(ganhadorId);
+  logInfo(
+    `Saldo do ganhador após conclusão: R$ ${ganhadorAtualizado.saldoPremio || 0}`,
+  );
+
+  if ((ganhadorAtualizado.saldoPremio || 0) < 1000) {
+    logError("❌ Ganhador não recebeu o saldo corretamente");
+    return false;
+  }
+
+  // ===========================================
+  // PARTE 2: Jogar Novamente COM SALDO (deve entrar como VERMELHO já pago)
+  // ===========================================
+  logInfo("\nParte 2: Jogar Novamente com saldo disponível...");
+
+  // Aguardar as novas rodadas serem criadas pela progressão
+  const novasRodadas = await Rodada.find({
+    _id: { $in: rodadaConcluida.rodadasGeradas || [] },
+  });
+
+  if (novasRodadas.length === 0) {
+    logError("❌ Nenhuma nova rodada foi gerada pela progressão");
+    return false;
+  }
+
+  logInfo(
+    `Novas rodadas disponíveis: ${novasRodadas.map((r) => r.nome).join(", ")}`,
+  );
+
+  // Verificar se o ganhador ainda não está em nenhuma rodada
+  const antesDeJogar =
+    await RodadaService.buscarRodadaAtivaDoUsuario(ganhadorId);
+  logInfo(`Antes de jogar novamente - em rodada ativa: ${!!antesDeJogar}`);
+
+  // Jogar novamente
+  const resultComSaldo = await RodadaService.jogarNovamente(
+    ganhadorId.toString(),
+  );
+
+  logInfo(`Resultado: ${resultComSaldo.message}`);
+  logInfo(`Pago automaticamente: ${resultComSaldo.pagoAutomaticamente}`);
+  logInfo(`Saldo restante: R$ ${resultComSaldo.saldoRestante || 0}`);
+
+  // Verificações
+  if (!resultComSaldo.pagoAutomaticamente) {
+    logError("❌ Jogar Novamente com saldo NÃO pagou automaticamente");
+    return false;
+  }
+
+  if (resultComSaldo.aguardando) {
+    logError(
+      "❌ Jogar Novamente com saldo foi para a fila (deveria entrar na rodada)",
+    );
+    return false;
+  }
+
+  // Verificar se entrou na rodada como VERMELHO
+  const rodadaAposEntrar = await Rodada.findById(resultComSaldo.rodadaId);
+  const participanteGanhador = rodadaAposEntrar.participantes.find(
+    (p) => p.usuario.toString() === ganhadorId.toString(),
+  );
+
+  if (!participanteGanhador || participanteGanhador.cor !== "vermelho") {
+    logError("❌ Ganhador não foi adicionado como VERMELHO na rodada");
+    return false;
+  }
+
+  // Verificar se o pagamento foi marcado como confirmado (pago com saldo)
+  const transacaoGanhador = await Transacao.findOne({
+    pagador: ganhadorId,
+    rodada: resultComSaldo.rodadaId,
+  });
+
+  if (!transacaoGanhador || transacaoGanhador.status !== "confirmado") {
+    logError("❌ Transação não foi marcada como confirmada (paga com saldo)");
+    return false;
+  }
+
+  // Verificar se o saldo foi descontado corretamente
+  const ganhadorFinal = await User.findById(ganhadorId);
+  logInfo(`Saldo final do ganhador: R$ ${ganhadorFinal.saldoPremio || 0}`);
+
+  if ((ganhadorFinal.saldoPremio || 0) !== 850) {
+    logError(
+      `❌ Saldo final incorreto: R$ ${ganhadorFinal.saldoPremio || 0} (esperado R$ 850)`,
+    );
+    return false;
+  }
+
+  logSuccess(
+    "✅ Jogar Novamente COM SALDO: entrou como VERMELHO pagou automaticamente",
+  );
+
+  // ===========================================
+  // PARTE 3: Jogar Novamente SEM SALDO (deve entrar gerando QR Code)
+  // ===========================================
+  logInfo("\nParte 3: Criando outro ganhador para testar sem saldo...");
+
+  // Criar nova rodada completa
+  const rodadaInicial2 = await RodadaService.criarRodada(admin._id);
+
+  for (let i = 1; i <= 14; i++) {
+    const usuario = await criarUsuario(
+      `Parte3_${i}`,
+      `parte3_${i}_${Date.now()}@teste.com`,
+    );
+    await RodadaService.adicionarParticipanteAmarelo(
+      rodadaInicial2._id,
+      usuario._id,
+      admin._id,
+    );
+  }
+
+  const rodadaIniciada2 = await Rodada.findById(rodadaInicial2._id);
+  const ganhador2Id = rodadaIniciada2.verde;
+  const ganhador2 = await User.findById(ganhador2Id);
+
+  // Pagar transações
+  const transacoes2 = await Transacao.find({ rodada: rodadaInicial2._id });
+  for (let i = 0; i < transacoes2.length; i++) {
+    await RodadaService.confirmarDeposito(
+      transacoes2[i]._id.toString(),
+      `comprovante_${i}.png`,
+      admin._id.toString(),
+    );
+  }
+
+  // SACAR o prêmio (para zerar o saldo)
+  const solicitacaoSaque = new SolicitacaoSaque({
+    usuario: ganhador2Id,
+    rodada: rodadaInicial2._id,
+    valor: 1000,
+    chavePix: ganhador2.chavePix,
+    tipoChavePix: ganhador2.tipoChavePix,
+    status: "aprovado",
+    dataSolicitacao: new Date(),
+    dataAprovacao: new Date(),
+  });
+  await solicitacaoSaque.save();
+
+  // Marcar como pago e zerar saldo
+  await User.findByIdAndUpdate(ganhador2Id, { saldoPremio: 0 });
+
+  const ganhador2SemSaldo = await User.findById(ganhador2Id);
+  logInfo(
+    `Saldo do segundo ganhador após saque: R$ ${ganhador2SemSaldo.saldoPremio || 0}`,
+  );
+
+  // Verificar se há rodadas disponíveis
+  const novasRodadas2 = await Rodada.find({
+    _id: {
+      $in: (await Rodada.findById(rodadaInicial2._id)).rodadasGeradas || [],
+    },
+  });
+
+  // Jogar novamente sem saldo
+  const resultSemSaldo = await RodadaService.jogarNovamente(
+    ganhador2Id.toString(),
+  );
+
+  logInfo(`Resultado sem saldo: ${resultSemSaldo.message}`);
+  logInfo(`Pago automaticamente: ${resultSemSaldo.pagoAutomaticamente}`);
+
+  if (resultSemSaldo.pagoAutomaticamente) {
+    logError(
+      "❌ Jogar Novamente sem saldo deveria gerar QR Code, não pagar automaticamente",
+    );
+    return false;
+  }
+
+  // Verificar se a transação está pendente
+  const transacaoSemSaldo = await Transacao.findOne({
+    pagador: ganhador2Id,
+    status: "pendente",
+  }).sort({ createdAt: -1 });
+
+  if (!transacaoSemSaldo || transacaoSemSaldo.status !== "pendente") {
+    logError("❌ Transação não foi criada como pendente");
+    return false;
+  }
+
+  logSuccess(
+    "✅ Jogar Novamente SEM SALDO: entrou como VERMELHO com QR Code pendente",
+  );
+
+  // ===========================================
+  // PARTE 4: Jogar Novamente sem vagas (deve ir para fila)
+  // ===========================================
+  logInfo("\nParte 4: Jogar Novamente sem vagas disponíveis...");
+
+  // Criar um usuário comum sem prêmio
+  const usuarioComum = await criarUsuario(
+    "UsuarioComum",
+    `comum_${Date.now()}@teste.com`,
+  );
+
+  // Jogar novamente (não tem rodada com vaga e não tem prêmio)
+  const resultSemVaga = await RodadaService.jogarNovamente(
+    usuarioComum._id.toString(),
+  );
+
+  logInfo(`Resultado sem vaga: ${resultSemVaga.message}`);
+  logInfo(`Está aguardando: ${resultSemVaga.aguardando}`);
+  logInfo(`Posição na fila: ${resultSemVaga.posicao}`);
+
+  // Verificar se foi adicionado à fila
+  const usuarioNaFila = await User.findById(usuarioComum._id);
+
+  if (!resultSemVaga.aguardando) {
+    logError("❌ Jogar Novamente sem vagas deveria ir para a FILA DE ESPERA");
+    return false;
+  }
+
+  if (!usuarioNaFila.aguardandoVermelho) {
+    logError("❌ Usuário não foi marcado como aguardandoVermelho na fila");
+    return false;
+  }
+
+  logSuccess(
+    "✅ Jogar Novamente SEM VAGAS: foi para a FILA DE ESPERA corretamente",
+  );
+
+  return true;
 }
 
 // ===========================================
@@ -940,6 +1232,10 @@ async function runAllTests() {
       name: "Regra 13: Email com QR Code é enviado",
       passed: await testarRegra13_EmailQrCodeEnviado(),
     });
+    results.push({
+      name: "Regra 14: Jogar Novamente - Com Saldo, Sem Saldo e Fila",
+      passed: await testarRegra14_JogarNovamenteComSaldo(),
+    });
 
     // ===========================================
     // RESUMO FINAL
@@ -990,6 +1286,9 @@ async function runAllTests() {
       console.log(`   ✅ Convite funciona corretamente`);
       console.log(`   ✅ AZUL pode captar (2 pessoas)`);
       console.log(`   ✅ Email com QR Code é enviado`);
+      console.log(`   ✅ Jogar Novamente: com saldo paga automaticamente`);
+      console.log(`   ✅ Jogar Novamente: sem saldo gera QR Code`);
+      console.log(`   ✅ Jogar Novamente: sem vaga vai para fila`);
     } else {
       console.log(
         `\n${colors.red}${colors.bright}⚠️ ATENÇÃO! ${totalCount - passedCount} teste(s) falharam.${colors.reset}`,

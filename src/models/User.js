@@ -27,6 +27,8 @@ const userSchema = new mongoose.Schema({
   saldo: { type: Number, default: 0 },
   totalGanho: { type: Number, default: 0 },
 
+  saldoPremio: { type: Number, default: 0 },
+
   // Campos para recuperacao de senha
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
