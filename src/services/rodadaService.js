@@ -57,6 +57,7 @@ class RodadaService {
       const rodadaAtiva = await Rodada.findOne({
         status: { $in: ["aguardando", "em_andamento"] },
         "participantes.usuario": usuarioId,
+        "participantes.cor": { $ne: "concluido" }, // 🔥 IGNORAR participantes concluídos
       });
 
       if (rodadaAtiva) {
@@ -964,6 +965,61 @@ class RodadaService {
             null,
           );
 
+          // 🔥 VERIFICAR SE TEM SALDO PARA PAGAR AUTOMATICAMENTE
+          const usuarioAlocado = await User.findById(usuario._id);
+          if (usuarioAlocado && (usuarioAlocado.saldoPremio || 0) >= 150) {
+            const transacao = await Transacao.findOne({
+              pagador: usuario._id,
+              rodada: rodada._id,
+              status: "pendente",
+            });
+
+            if (transacao) {
+              transacao.status = "confirmado";
+              transacao.dataConfirmacao = new Date();
+              transacao.metadata = {
+                ...(transacao.metadata || {}),
+                pagoComSaldo: true,
+                alocadoDaFila: true,
+                valorDescontado: 150,
+              };
+              await transacao.save();
+
+              const rodadaAtualizada = await Rodada.findById(rodada._id);
+              const participante = rodadaAtualizada.participantes.find(
+                (p) => p.usuario.toString() === usuario._id.toString(),
+              );
+              if (participante) {
+                participante.depositoConfirmado = true;
+                participante.dataDeposito = new Date();
+                participante.comprovantePix = "PAGO_COM_SALDO_FILA";
+              }
+
+              const vermelhos = rodadaAtualizada.participantes.filter(
+                (p) => p.cor === "vermelho",
+              );
+              const vermelhosPagos = vermelhos.filter(
+                (v) => v.depositoConfirmado === true,
+              );
+              rodadaAtualizada.totalDepositosConfirmados =
+                vermelhosPagos.length;
+              await rodadaAtualizada.save();
+
+              const novoSaldo = (usuarioAlocado.saldoPremio || 0) - 150;
+              await User.findByIdAndUpdate(usuario._id, {
+                $set: { saldoPremio: novoSaldo },
+              });
+
+              console.log(
+                `   💰 Usuário ${usuario.nome} pagou automaticamente com saldo da fila. Restante: R$ ${novoSaldo}`,
+              );
+
+              if (vermelhosPagos.length === vermelhos.length) {
+                await this.verificarEAvancarSeNecessario(rodada._id);
+              }
+            }
+          }
+
           // Remover da fila
           usuarioAtual.aguardandoVermelho = false;
           usuarioAtual.posicaoFila = null;
@@ -996,6 +1052,7 @@ class RodadaService {
 
     return alocados;
   }
+
   // ===========================================
   // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS
   // ===========================================
@@ -1311,12 +1368,25 @@ class RodadaService {
     }
   }
 
+  // ===========================================
+  // BUSCAR RODADA ATIVA DO USUARIO (IGNORA CONCLUIDOS)
+  // ===========================================
   async buscarRodadaAtivaDoUsuario(usuarioId) {
     try {
+      // 🔥 CORREÇÃO COMPLETA: Ignorar participantes com cor "concluido"
+      // e também garantir que a rodada não está concluída
       const rodada = await Rodada.findOne({
         status: { $in: ["aguardando", "em_andamento"] },
         "participantes.usuario": usuarioId,
+        "participantes.cor": { $ne: "concluido" },
       });
+
+      if (rodada) {
+        console.log(
+          `[buscarRodadaAtivaDoUsuario] Usuário ${usuarioId} encontrado na rodada ${rodada.nome} com cor ${rodada.participantes.find((p) => p.usuario.toString() === usuarioId)?.cor}`,
+        );
+      }
+
       return rodada;
     } catch (error) {
       console.error("Erro ao buscar rodada ativa:", error);
@@ -1624,7 +1694,9 @@ class RodadaService {
       );
       console.log(`📍 Posição na fila: ${usuario.posicaoFila || "nenhuma"}`);
 
-      // Verificar se o usuario tem alguma solicitacao PENDENTE
+      // ===========================================
+      // SE HÁ SAQUE PENDENTE, CANCELAR AUTOMATICAMENTE
+      // ===========================================
       const SolicitacaoSaque = require("../models/SolicitacaoSaque");
       const solicitacaoPendente = await SolicitacaoSaque.findOne({
         usuario: usuarioId,
@@ -1632,8 +1704,16 @@ class RodadaService {
       });
 
       if (solicitacaoPendente) {
-        throw new Error(
-          "Voce tem um saque pendente de aprovacao. Aguarde a aprovacao para jogar novamente.",
+        console.log(
+          `⏳ Saque pendente encontrado (ID: ${solicitacaoPendente._id}). Cancelando...`,
+        );
+        solicitacaoPendente.status = "recusado";
+        solicitacaoPendente.motivoRecusa =
+          "Cancelado automaticamente ao jogar novamente (usou parte do saldo)";
+        solicitacaoPendente.dataRecusa = new Date();
+        await solicitacaoPendente.save();
+        console.log(
+          `✅ Saque pendente cancelado. Saldo de R$ ${usuario.saldoPremio || 0} continua disponível.`,
         );
       }
 
@@ -1719,20 +1799,39 @@ class RodadaService {
           null,
         );
 
-        // 🔥 SE TEM SALDO, MARCAR COMO PAGO AUTOMATICAMENTE
+        // 🔥 SE TEM SALDO, CRIAR TRANSACAO E MARCAR COMO PAGO AUTOMATICAMENTE
         if (temSaldo) {
           console.log(
-            `💰 Usuário tem saldo de R$ ${saldoRestante}. Aplicando pagamento automático...`,
+            `💰 Usuário tem saldo de R$ ${saldoRestante}. Criando transação e aplicando pagamento automático...`,
           );
 
-          // Buscar a transação criada
-          const transacao = await Transacao.findOne({
-            pagador: usuarioId,
-            rodada: rodadaParaEntrar._id,
-            status: "pendente",
-          });
+          // 🔥 CRIA A TRANSACAO IMEDIATAMENTE
+          const verdeId = rodadaParaEntrar.verde;
+          if (!verdeId) {
+            console.log(
+              `⚠️ Rodada ${rodadaParaEntrar.nome} não tem VERDE definido!`,
+            );
+          } else {
+            // Verificar se a transação já existe
+            let transacao = await Transacao.findOne({
+              pagador: usuarioId,
+              rodada: rodadaParaEntrar._id,
+            });
 
-          if (transacao) {
+            // Se não existe, criar uma nova
+            if (!transacao) {
+              transacao = new Transacao({
+                tipo: "deposito",
+                pagador: usuarioId,
+                recebedor: verdeId,
+                valor: 150,
+                rodada: rodadaParaEntrar._id,
+                status: "pendente",
+              });
+              await transacao.save();
+              console.log(`   ✅ Transação criada: ${transacao._id}`);
+            }
+
             // Marcar transação como confirmada
             transacao.status = "confirmado";
             transacao.dataConfirmacao = new Date();
@@ -1755,9 +1854,10 @@ class RodadaService {
               participante.depositoConfirmado = true;
               participante.dataDeposito = new Date();
               participante.comprovantePix = "PAGO_COM_SALDO";
+              participante.transacaoId = transacao._id;
             }
 
-            // Contar vermelhos pagos
+            // Contar vermelhos pagos e atualizar total
             const vermelhos = rodadaAtualizada.participantes.filter(
               (p) => p.cor === "vermelho",
             );
@@ -1781,8 +1881,12 @@ class RodadaService {
               `✅ Pagamento automático realizado! Saldo restante: R$ ${saldoRestante}`,
             );
 
-            // Verificar se a rodada completou todos os pagamentos
-            if (vermelhosPagos.length === vermelhos.length) {
+            // Verificar se a rodada completou todos os pagamentos (15 participantes)
+            // Só avança se a rodada estiver completa
+            if (
+              rodadaAtualizada.participantes.length === 15 &&
+              vermelhosPagos.length === vermelhos.length
+            ) {
               await this.verificarEAvancarSeNecessario(rodadaParaEntrar._id);
             }
           }

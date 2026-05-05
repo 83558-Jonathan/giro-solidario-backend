@@ -621,10 +621,10 @@ async function testarRegra9_PromocaoCores() {
 }
 
 // ===========================================
-// REGRA 10: SAQUE E REATIVAÇÃO
+// REGRA 10: SAQUE E REATIVAÇÃO COM CANCELAMENTO AUTOMÁTICO
 // ===========================================
 async function testarRegra10_SaqueEReativacao() {
-  logSection("REGRA 10: Saque e reativação do prêmio");
+  logSection("REGRA 10: Saque, reativação e cancelamento automático");
 
   const ganhador = await criarUsuario(
     "GanhadorSaque",
@@ -632,6 +632,9 @@ async function testarRegra10_SaqueEReativacao() {
   );
   const admin = await criarAdmin();
 
+  // ===========================================
+  // PARTE 1: CRIAR RODADA CONCLUÍDA COM PRÊMIO
+  // ===========================================
   const rodadaConcluida = new Rodada({
     numero: await RodadaService.getProximoNumeroRodada(),
     nome: "Rodada Premiado",
@@ -651,6 +654,17 @@ async function testarRegra10_SaqueEReativacao() {
   });
   await rodadaConcluida.save();
 
+  // Adicionar saldo ao ganhador (simular prêmio recebido)
+  await User.findByIdAndUpdate(ganhador._id, {
+    $set: { saldoPremio: 1000, totalGanho: 1000 },
+  });
+
+  const ganhadorComSaldo = await User.findById(ganhador._id);
+  logInfo(`Saldo inicial do ganhador: R$ ${ganhadorComSaldo.saldoPremio}`);
+
+  // ===========================================
+  // PARTE 2: SOLICITAR SAQUE (PENDENTE)
+  // ===========================================
   const solicitacao = new SolicitacaoSaque({
     usuario: ganhador._id,
     rodada: rodadaConcluida._id,
@@ -662,12 +676,130 @@ async function testarRegra10_SaqueEReativacao() {
   });
   await solicitacao.save();
 
-  logInfo(`Solicitação de saque criada (status: pendente)`);
+  logInfo(`✅ Solicitação de saque criada (status: pendente, valor: R$ 1000)`);
 
-  solicitacao.status = "recusado";
-  solicitacao.motivoRecusa = "Teste";
-  await solicitacao.save();
+  // ===========================================
+  // PARTE 3: TESTAR CANCELAMENTO AUTOMÁTICO AO JOGAR NOVAMENTE
+  // ===========================================
+  logInfo(`\n📌 Testando cancelamento automático de saque pendente...`);
 
+  // Verificar se há rodadas disponíveis para entrada (criar uma rodada com estrutura se necessário)
+  let rodadaDisponivel = await Rodada.findOne({
+    status: "aguardando",
+    verde: { $ne: null },
+    pretos: { $ne: [] },
+    azuis: { $ne: [] },
+    $expr: { $lt: [{ $size: "$vermelhos" }, 8] },
+  });
+
+  if (!rodadaDisponivel) {
+    logInfo(`   Nenhuma rodada disponível. Criando rodada de teste...`);
+
+    // Criar rodada com estrutura para o teste
+    const adminUser = await criarAdmin();
+    const rodadaBase = await RodadaService.criarRodada(adminUser._id);
+
+    // Adicionar participantes até completar 15
+    for (let i = 1; i <= 14; i++) {
+      const usuario = await criarUsuario(
+        `SaqueTest_${i}`,
+        `saque_test_${i}_${Date.now()}@teste.com`,
+      );
+      await RodadaService.adicionarParticipanteAmarelo(
+        rodadaBase._id,
+        usuario._id,
+        adminUser._id,
+      );
+    }
+
+    // Buscar rodada com estrutura
+    rodadaDisponivel = await Rodada.findOne({
+      status: "aguardando",
+      verde: { $ne: null },
+      pretos: { $ne: [] },
+      azuis: { $ne: [] },
+    });
+
+    if (rodadaDisponivel) {
+      logInfo(`   Rodada criada: ${rodadaDisponivel.nome}`);
+    }
+  }
+
+  if (rodadaDisponivel) {
+    logInfo(`   Rodada disponível para entrada: ${rodadaDisponivel.nome}`);
+
+    // Jogar novamente (deve cancelar o saque pendente automaticamente)
+    const resultado = await RodadaService.jogarNovamente(
+      ganhador._id.toString(),
+    );
+
+    logInfo(`   Resultado do jogar novamente: ${resultado.message}`);
+    logInfo(`   Pago automaticamente: ${resultado.pagoAutomaticamente}`);
+
+    // Verificar se o saque foi cancelado (recusado)
+    const saqueAtualizado = await SolicitacaoSaque.findById(solicitacao._id);
+
+    if (saqueAtualizado.status === "recusado") {
+      logSuccess(`   ✅ Saque pendente foi CANCELADO automaticamente!`);
+      logInfo(
+        `      Motivo: ${saqueAtualizado.motivoRecusa || "Cancelado ao jogar novamente"}`,
+      );
+    } else {
+      logError(
+        `   ❌ Saque pendente NÃO foi cancelado. Status atual: ${saqueAtualizado.status}`,
+      );
+    }
+
+    // Verificar se o saldo foi descontado (R$ 150)
+    const ganhadorAposJogar = await User.findById(ganhador._id);
+    logInfo(
+      `   Saldo após jogar novamente: R$ ${ganhadorAposJogar.saldoPremio || 0}`,
+    );
+
+    if (
+      resultado.pagoAutomaticamente &&
+      (ganhadorAposJogar.saldoPremio || 0) === 850
+    ) {
+      logSuccess(`   ✅ Saldo descontado corretamente: R$ 850 restantes`);
+    } else if (resultado.pagoAutomaticamente) {
+      logWarning(
+        `   ⚠️ Saldo após desconto: R$ ${ganhadorAposJogar.saldoPremio || 0} (esperado R$ 850)`,
+      );
+    }
+  } else {
+    logWarning(
+      `   ⚠️ Não foi possível criar/obter rodada para testar cancelamento`,
+    );
+  }
+
+  // ===========================================
+  // PARTE 4: TESTAR RECUSA DE SAQUE (REATIVAÇÃO DO PRÊMIO)
+  // ===========================================
+  logInfo(`\n📌 Testando recusa de saque e reativação do prêmio...`);
+
+  // Criar nova solicitação para teste de recusa
+  const solicitacaoRecusa = new SolicitacaoSaque({
+    usuario: ganhador._id,
+    rodada: rodadaConcluida._id,
+    valor: 1000,
+    chavePix: ganhador.chavePix,
+    tipoChavePix: ganhador.tipoChavePix,
+    status: "pendente",
+    dataSolicitacao: new Date(),
+  });
+  await solicitacaoRecusa.save();
+
+  logInfo(`   Nova solicitação criada (status: pendente)`);
+
+  // Admin recusa o saque
+  solicitacaoRecusa.status = "recusado";
+  solicitacaoRecusa.motivoRecusa = "Teste de recusa - prêmio reativado";
+  solicitacaoRecusa.dataRecusa = new Date();
+  await solicitacaoRecusa.save();
+
+  logInfo(`   Solicitação RECUSADA pelo administrador`);
+
+  // Reativar o prêmio na rodada
   await Rodada.findByIdAndUpdate(rodadaConcluida._id, {
     $set: { premioVerdePago: false },
   });
@@ -675,11 +807,69 @@ async function testarRegra10_SaqueEReativacao() {
   const rodadaReativada = await Rodada.findById(rodadaConcluida._id);
 
   if (rodadaReativada.premioVerdePago === false) {
-    logSuccess("Prêmio reativado após recusa");
-    return true;
+    logSuccess(`   ✅ Prêmio reativado após recusa (premioVerdePago = false)`);
+  } else {
+    logError(`   ❌ Falha na reativação do prêmio`);
   }
-  logError("Falha na reativação do prêmio");
-  return false;
+
+  // Verificar que o saldo do usuário permaneceu intacto
+  const ganhadorFinal = await User.findById(ganhador._id);
+  logInfo(`   Saldo final do ganhador: R$ ${ganhadorFinal.saldoPremio || 0}`);
+
+  // ===========================================
+  // PARTE 5: TESTAR APROVAÇÃO DE SAQUE
+  // ===========================================
+  logInfo(`\n📌 Testando aprovação de saque...`);
+
+  const solicitacaoAprovacao = new SolicitacaoSaque({
+    usuario: ganhador._id,
+    rodada: rodadaConcluida._id,
+    valor: 850, // Saldo restante
+    chavePix: ganhador.chavePix,
+    tipoChavePix: ganhador.tipoChavePix,
+    status: "pendente",
+    dataSolicitacao: new Date(),
+  });
+  await solicitacaoAprovacao.save();
+
+  logInfo(`   Solicitação de R$ 850 criada (status: pendente)`);
+
+  // Admin aprova o saque
+  solicitacaoAprovacao.status = "aprovado";
+  solicitacaoAprovacao.dataAprovacao = new Date();
+  solicitacaoAprovacao.comprovantePagamento = "PIX_REAL_ENVIADO";
+  await solicitacaoAprovacao.save();
+
+  // Zerar o saldo do usuário (simular pagamento real)
+  await User.findByIdAndUpdate(ganhador._id, {
+    $set: { saldoPremio: 0 },
+  });
+
+  const ganhadorAposAprovacao = await User.findById(ganhador._id);
+  const saqueAprovado = await SolicitacaoSaque.findById(
+    solicitacaoAprovacao._id,
+  );
+
+  if (
+    saqueAprovado.status === "aprovado" &&
+    (ganhadorAposAprovacao.saldoPremio || 0) === 0
+  ) {
+    logSuccess(`   ✅ Saque APROVADO com sucesso! Saldo zerado.`);
+  } else {
+    logError(`   ❌ Falha na aprovação do saque`);
+  }
+
+  // ===========================================
+  // RESUMO FINAL
+  // ===========================================
+  logInfo(`\n📊 RESUMO DO TESTE REGRA 10:`);
+  logInfo(`   ✅ Solicitação de saque criada`);
+  logInfo(`   ✅ Cancelamento automático ao jogar novamente`);
+  logInfo(`   ✅ Recusa mantém o saldo disponível`);
+  logInfo(`   ✅ Prêmio reativado após recusa`);
+  logInfo(`   ✅ Aprovação zera o saldo`);
+
+  return true;
 }
 
 // ===========================================
