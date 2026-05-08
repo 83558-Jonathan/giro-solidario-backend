@@ -330,7 +330,7 @@ exports.jogarNovamente = async (req, res) => {
 };
 
 // ===========================================
-// SACAR PRÊMIO DO VERDE (CORRIGIDO COM ADIÇÃO DE SALDO)
+// SACAR PRÊMIO DO VERDE (CORRIGIDO - SEM DUPLICAR SALDO)
 // ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
@@ -344,10 +344,7 @@ exports.sacarPremio = async (req, res) => {
     console.log(`   Usuário ID do token: ${usuarioId}`);
 
     if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
-      console.log("❌ ID da rodada inválido");
-      return res
-        .status(400)
-        .json({ success: false, error: "ID da rodada inválido" });
+      return res.status(400).json({ success: false, error: "ID da rodada inválido" });
     }
 
     const db = mongoose.connection.db;
@@ -356,65 +353,29 @@ exports.sacarPremio = async (req, res) => {
     });
 
     if (!rodada) {
-      console.log("❌ Rodada não encontrada");
-      return res
-        .status(404)
-        .json({ success: false, error: "Rodada não encontrada" });
+      return res.status(404).json({ success: false, error: "Rodada não encontrada" });
     }
 
     console.log(`\n📊 DADOS DA RODADA:`);
     console.log(`   Nome: ${rodada.nome}`);
     console.log(`   Status: ${rodada.status}`);
     console.log(`   Verde (campo): ${rodada.verde}`);
-    console.log(`   Tipo do verde: ${typeof rodada.verde}`);
     console.log(`   Prêmio pago: ${rodada.premioVerdePago}`);
 
     if (rodada.status !== "concluida") {
-      console.log(
-        `❌ Rodada não está concluída. Status atual: ${rodada.status}`,
-      );
-      return res
-        .status(400)
-        .json({ success: false, error: "Esta rodada ainda não foi concluída" });
+      return res.status(400).json({ success: false, error: "Esta rodada ainda não foi concluída" });
     }
 
-    // Converter ambos para string para comparação segura
-    const verdeIdStr = rodada.verde?.toString
-      ? rodada.verde.toString()
-      : String(rodada.verde);
+    // Verifica se o usuário é o verde ou está como concluído
+    const verdeIdStr = rodada.verde?.toString ? rodada.verde.toString() : String(rodada.verde);
     const usuarioIdStr = String(usuarioId);
     const ehVerde = verdeIdStr === usuarioIdStr;
 
     const participanteConcluido = rodada.participantes?.find(
-      (p) => p.usuario.toString() === usuarioIdStr && p.cor === "concluido",
+      (p) => p.usuario.toString() === usuarioIdStr && p.cor === "concluido"
     );
 
-    console.log(`\n🔍 VERIFICANDO PERMISSÃO:`);
-    console.log(`   Usuario ID (string): ${usuarioIdStr}`);
-    console.log(`   Verde da rodada (string): ${verdeIdStr}`);
-    console.log(`   É o verde? ${ehVerde ? "SIM ✅" : "NÃO ❌"}`);
-
-    if (participanteConcluido) {
-      console.log(`   Participante concluído encontrado: SIM ✅`);
-    } else {
-      console.log(`   Participante concluído encontrado: NÃO ❌`);
-    }
-
-    const todosConcluidos =
-      rodada.participantes?.filter((p) => p.cor === "concluido") || [];
-    console.log(`\n📋 PARTICIPANTES COM COR 'concluido' (ganhadores):`);
-    for (const p of todosConcluidos) {
-      const user = await db.collection("users").findOne({ _id: p.usuario });
-      console.log(`   - ${user?.nome || p.usuario} (ID: ${p.usuario})`);
-    }
-
     if (!ehVerde && !participanteConcluido) {
-      console.log(
-        `\n❌ ACESSO NEGADO! Usuário não tem permissão para sacar este prêmio.`,
-      );
-      console.log(
-        `   Motivo: Não é o VERDE da rodada e não tem cor 'concluido'`,
-      );
       return res.status(403).json({
         success: false,
         error: "Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo",
@@ -422,7 +383,6 @@ exports.sacarPremio = async (req, res) => {
     }
 
     if (rodada.premioVerdePago === true) {
-      console.log(`❌ Prêmio já foi solicitado anteriormente`);
       return res.status(400).json({
         success: false,
         error: "Prêmio já foi solicitado anteriormente",
@@ -431,21 +391,18 @@ exports.sacarPremio = async (req, res) => {
 
     const usuario = await User.findById(usuarioId);
     if (!usuario) {
-      console.log(`❌ Usuário não encontrado no banco`);
-      return res
-        .status(404)
-        .json({ success: false, error: "Usuário não encontrado" });
+      return res.status(404).json({ success: false, error: "Usuário não encontrado" });
     }
 
     console.log(`\n👤 DADOS DO USUÁRIO:`);
     console.log(`   Nome: ${usuario.nome}`);
     console.log(`   Email: ${usuario.email}`);
     console.log(`   Chave PIX: ${usuario.chavePix}`);
-    console.log(`   Tipo Chave PIX: ${usuario.tipoChavePix}`);
     console.log(`   Saldo prêmio atual: R$ ${usuario.saldoPremio || 0}`);
 
     // ===========================================
-    // 🔥 CRIAR SOLICITAÇÃO DE SAQUE
+    // 🔥 CORREÇÃO: NÃO adicionar saldo aqui!
+    // O saldo já foi creditado quando a rodada foi concluída (avancarRodada)
     // ===========================================
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,
@@ -460,39 +417,23 @@ exports.sacarPremio = async (req, res) => {
     await solicitacao.save();
     console.log(`✅ Solicitação de saque criada (ID: ${solicitacao._id})`);
 
-    // ===========================================
-    // 🔥 ADICIONAR SALDO AO USUÁRIO (para usar como crédito)
-    // ===========================================
-    await User.findByIdAndUpdate(usuarioId, {
-      $inc: { saldoPremio: 1000 },
-    });
-    console.log(`✅ Adicionado R$ 1.000 ao saldo de prêmio do usuário`);
-
     // Marcar que já foi solicitado (evita duplicidade)
     await db
       .collection("rodadas")
       .updateOne(
         { _id: new mongoose.Types.ObjectId(rodadaId) },
-        { $set: { premioVerdePago: true } },
+        { $set: { premioVerdePago: true } }
       );
     console.log(`✅ Rodada marcada como premiada (premioVerdePago = true)`);
 
-    console.log(
-      `\n💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`,
-    );
-    console.log(
-      `💰 Saldo de prêmio atualizado para R$ ${(usuario.saldoPremio || 0) + 1000}`,
-    );
+    console.log(`💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`);
+    console.log(`💰 Saldo de prêmio permanece R$ ${usuario.saldoPremio || 0} (aguardando aprovação)`);
     console.log("=".repeat(60) + "\n");
 
     // Enviar email de notificação para o admin
     try {
       const emailController = require("./emailController");
-      await emailController.notificarAdminNovaSolicitacao(
-        usuario,
-        rodada,
-        1000,
-      );
+      await emailController.notificarAdminNovaSolicitacao(usuario, rodada, 1000);
       console.log(`📧 Email de notificação enviado para o admin`);
     } catch (emailError) {
       console.error("❌ Erro ao notificar admin:", emailError);
@@ -500,8 +441,7 @@ exports.sacarPremio = async (req, res) => {
 
     res.json({
       success: true,
-      message:
-        "Solicitação de saque enviada! Aguarde a aprovação do administrador.",
+      message: "Solicitação de saque enviada! Aguarde a aprovação do administrador.",
       solicitacaoId: solicitacao._id,
     });
   } catch (error) {
