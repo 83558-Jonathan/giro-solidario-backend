@@ -1,70 +1,69 @@
 // Script para criar 20 usuários de teste via front-end
 (async function criarUsuariosEmMassa() {
+    // 🔧 CONFIGURE A URL BASE DO SEU BACKEND
+    const API_BASE = 'http://localhost:5001/api'; // Altere se necessário
     const TOTAL_USUARIOS = 20;
-    console.log(`🚀 Iniciando criação de ${TOTAL_USUARIOS} usuários de teste...`);
+    const CONVITE_CODE = 'CONVITE-ADMIN-MASTER'; // Código de convite válido (admin master)
 
-    const conviteCode = 'CONVITE-ADMIN-MASTER';
+    console.log(`🚀 Iniciando criação de ${TOTAL_USUARIOS} usuários...`);
+    console.log(`🔗 API Base: ${API_BASE}`);
+
     const resultados = [];
     const erros = [];
 
-    // Função para gerar dados aleatórios
-    const gerarNome = (i) => `teste${i}`;
-    const gerarEmail = (i) => `teste${i}@teste.com`;
-    const gerarCPF = () => {
-        const cpf = Math.floor(Math.random() * 99999999999).toString().padStart(11, '0');
+    // Gera CPF único baseado no timestamp + índice (evita colisão)
+    const gerarCPFUnico = (index) => {
+        const base = Date.now().toString().slice(-6) + index.toString().padStart(4, '0');
+        const cpf = base.padEnd(11, '0').slice(0, 11);
         return cpf;
     };
-    const gerarTelefone = () => `31${Math.floor(Math.random() * 999999999).toString().padStart(9, '0')}`;
 
-    // Mostrar progresso
-    console.log(`📊 Criando ${TOTAL_USUARIOS} usuários...\n`);
+    const gerarTelefone = () => `31${Math.floor(Math.random() * 999999999).toString().padStart(9, '0')}`;
 
     for (let i = 1; i <= TOTAL_USUARIOS; i++) {
         try {
-            const nome = gerarNome(i);
-            const email = gerarEmail(i);
-            const cpf = gerarCPF();
+            const nome = `teste${i}`;
+            const email = `teste${i}_${Date.now()}@teste.com`; // Email único
+            const cpf = gerarCPFUnico(i);
             const telefone = gerarTelefone();
 
             console.log(`🔄 [${i}/${TOTAL_USUARIOS}] Criando: ${nome} (${email})`);
 
-            const response = await fetch('/api/auth/registrar', {
+            const response = await fetch(`${API_BASE}/auth/registrar`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    nome: nome,
-                    email: email,
-                    telefone: telefone,
-                    cpf: cpf,
+                    nome,
+                    email,
+                    telefone,
+                    cpf,
                     chavePix: email,
                     tipoChavePix: 'email',
                     senha: 'Teste@123',
-                    codigoConvite: conviteCode
+                    codigoConvite: CONVITE_CODE
                 })
             });
 
             const data = await response.json();
 
             if (response.ok) {
-                console.log(`✅ [${i}/${TOTAL_USUARIOS}] Sucesso: ${nome}`);
+                console.log(`✅ [${i}/${TOTAL_USUARIOS}] Sucesso: ${nome} → ${data.entrouNaFila ? 'Fila' : 'Rodada'}`);
                 resultados.push({
                     id: data.usuario?.id || 'N/A',
-                    nome: nome,
-                    email: email,
+                    nome,
+                    email,
                     senha: 'Teste@123',
-                    status: data.entrouNaFila ? 'Fila' : 'Rodada',
+                    status: data.entrouNaFila ? `Fila (pos ${data.posicaoFila || '?'})` : `Rodada ${data.rodadaId || '?'}`,
                     rodadaId: data.rodadaId || 'N/A',
                     posicaoFila: data.posicaoFila || 'N/A'
                 });
             } else {
-                console.error(`❌ [${i}/${TOTAL_USUARIOS}] Erro: ${data.error || 'Erro desconhecido'}`);
+                console.error(`❌ [${i}/${TOTAL_USUARIOS}] Erro: ${data.error || 'Desconhecido'}`);
                 erros.push({ nome, email, error: data.error });
             }
 
-            // Pequeno delay entre requisições para não sobrecarregar
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // Delay entre requisições (evita sobrecarga)
+            await new Promise(resolve => setTimeout(resolve, 800));
 
         } catch (error) {
             console.error(`❌ [${i}/${TOTAL_USUARIOS}] Exceção: ${error.message}`);
@@ -83,7 +82,7 @@
         console.log('\n📋 USUÁRIOS CRIADOS:');
         console.table(resultados);
 
-        // Salvar resultados em arquivo
+        // Salvar resultados em arquivo JSON
         const blob = new Blob([JSON.stringify(resultados, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

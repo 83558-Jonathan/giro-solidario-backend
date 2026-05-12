@@ -1205,28 +1205,113 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     { $set: { status: 'concluida' } }
   )
 
-  // Criar nova rodada com estrutura (já iniciada) para gerar vagas
-  const novaRodada = await RodadaService.criarRodada(admin._id)
-  for (let i = 1; i <= 14; i++) {
-    const p = await criarUsuario(
-      `NovaRodada_${i}`,
-      `nova_${i}_${Date.now()}@teste.com`
-    )
-    await RodadaService.adicionarParticipanteAmarelo(
-      novaRodada._id,
-      p._id,
-      admin._id
-    )
-  }
-  // Após adicionar 14 participantes, a rodada terá 15 e será iniciada automaticamente
-  await new Promise(resolve => setTimeout(resolve, 500))
+  // ----------------------------------------------------------------------
+  // CRIAR UMA RODADA QUE JÁ NASCE COM ESTRUTURA (VERDE, PRETOS, AZUIS)
+  // Mas sem nenhum VERMELHO – exatamente como uma rodada gerada por progressão
+  // ----------------------------------------------------------------------
+  const verdeRodada = await criarUsuario(
+    'VerdeEstrutura',
+    `verde_estrutura_${Date.now()}@teste.com`
+  )
+  const preto1 = await criarUsuario(
+    'PretoEstrutura1',
+    `preto_estrutura1_${Date.now()}@teste.com`
+  )
+  const preto2 = await criarUsuario(
+    'PretoEstrutura2',
+    `preto_estrutura2_${Date.now()}@teste.com`
+  )
+  const azul1 = await criarUsuario(
+    'AzulEstrutura1',
+    `azul_estrutura1_${Date.now()}@teste.com`
+  )
+  const azul2 = await criarUsuario(
+    'AzulEstrutura2',
+    `azul_estrutura2_${Date.now()}@teste.com`
+  )
+  const azul3 = await criarUsuario(
+    'AzulEstrutura3',
+    `azul_estrutura3_${Date.now()}@teste.com`
+  )
+  const azul4 = await criarUsuario(
+    'AzulEstrutura4',
+    `azul_estrutura4_${Date.now()}@teste.com`
+  )
 
-  // Forçar alocação da fila
+  const proximoNumero = await RodadaService.getProximoNumeroRodada()
+  const rodadaComEstrutura = new Rodada({
+    numero: proximoNumero,
+    nome: `Rodada_Estrutura_${proximoNumero}`,
+    status: 'aguardando',
+    participantes: [
+      {
+        usuario: verdeRodada._id,
+        cor: 'verde',
+        posicao: 1,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto1._id,
+        cor: 'preto',
+        posicao: 2,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto2._id,
+        cor: 'preto',
+        posicao: 3,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul1._id,
+        cor: 'azul',
+        posicao: 4,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul2._id,
+        cor: 'azul',
+        posicao: 5,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul3._id,
+        cor: 'azul',
+        posicao: 6,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul4._id,
+        cor: 'azul',
+        posicao: 7,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      }
+    ],
+    verde: verdeRodada._id,
+    pretos: [preto1._id, preto2._id],
+    azuis: [azul1._id, azul2._id, azul3._id, azul4._id],
+    vermelhos: [],
+    totalDepositosConfirmados: 0,
+    todosDepositaram: false
+  })
+  await rodadaComEstrutura.save()
+  logInfo(
+    `Rodada com estrutura criada: ${rodadaComEstrutura.nome} (status ${rodadaComEstrutura.status}, vermelhos: ${rodadaComEstrutura.vermelhos.length}/8)`
+  )
+
+  // Forçar alocação da fila (agora deve encontrar a rodada acima com 7/15 participantes e 0/8 vermelhos)
   const alocados = await RodadaService.alocarFilaEmTodasRodadas()
 
   // Verificar se o verde5 foi alocado
   const verde5PosAlocacao = await User.findById(verde5._id)
-  const rodadaAtualizada = await Rodada.findById(novaRodada._id)
+  const rodadaAtualizada = await Rodada.findById(rodadaComEstrutura._id)
   const participante5 = rodadaAtualizada.participantes.find(
     p => p.usuario.toString() === verde5._id.toString()
   )
@@ -1282,7 +1367,6 @@ async function testarRegra14_JogarNovamenteComSaldo () {
   // Todos os subcenários passaram
   return true
 }
-
 // ===========================================
 // FUNÇÃO PRINCIPAL
 // ===========================================

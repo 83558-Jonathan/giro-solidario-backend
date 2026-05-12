@@ -10,7 +10,7 @@ const solicitacaoSaqueSchema = new mongoose.Schema({
     rodada: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Rodada',
-        required: true
+        required: false   // <--- ALTERADO: agora não é obrigatório
     },
     valor: {
         type: Number,
