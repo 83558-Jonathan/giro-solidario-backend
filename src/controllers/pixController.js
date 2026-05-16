@@ -1,532 +1,515 @@
-const abacate = require("../config/abacate");
-const Transacao = require("../models/Transacao");
-const Rodada = require("../models/Rodada");
-const RodadaService = require("../services/rodadaService");
+const abacate = require('../config/abacate')
+const Transacao = require('../models/Transacao')
+const Rodada = require('../models/Rodada')
+const User = require('../models/User')
+const RodadaService = require('../services/rodadaService')
+
+const VALOR_VERMELHO = 150
+const pagamentosProcessados = new Map()
 
 // ===========================================
-// NOVOS VALORES (SEM TAXA SEPARADA)
+// AUXILIAR: processar pagamento com controle de duplicidade
 // ===========================================
-const VALOR_VERMELHO = 150; // R$ 150,00 direto
-
-// Cache para controle de pagamentos processados (evita duplicidade)
-const pagamentosProcessados = new Map();
-
-/**
- * Função auxiliar para processar pagamento com controle de duplicidade
- */
-async function processarPagamentoComControle(transacaoId, source = "webhook") {
-  // Verificar se este pagamento já foi processado recentemente
+async function processarPagamentoComControle (transacaoId, source = 'webhook') {
   if (pagamentosProcessados.has(transacaoId)) {
-    const processadoEm = pagamentosProcessados.get(transacaoId);
-    const segundosDesdeProcessamento = (Date.now() - processadoEm) / 1000;
-
+    const processadoEm = pagamentosProcessados.get(transacaoId)
+    const segundosDesdeProcessamento = (Date.now() - processadoEm) / 1000
     console.log(
-      `⚠️ [${source}] Pagamento ${transacaoId} já foi processado há ${segundosDesdeProcessamento.toFixed(1)}s. Ignorando.`,
-    );
+      `⚠️ [${source}] Pagamento ${transacaoId} já foi processado há ${segundosDesdeProcessamento.toFixed(
+        1
+      )}s. Ignorando.`
+    )
     return {
       success: false,
-      message: "Pagamento já processado",
-      jaProcessado: true,
-    };
+      message: 'Pagamento já processado',
+      jaProcessado: true
+    }
   }
 
-  // Marcar como processando (evita concorrência)
-  pagamentosProcessados.set(transacaoId, Date.now());
+  pagamentosProcessados.set(transacaoId, Date.now())
 
   try {
-    // Buscar transação
-    const transacao = await Transacao.findById(transacaoId);
-
+    const transacao = await Transacao.findById(transacaoId)
     if (!transacao) {
-      console.error(`❌ [${source}] Transação não encontrada: ${transacaoId}`);
-      pagamentosProcessados.delete(transacaoId);
-      return { success: false, message: "Transação não encontrada" };
+      console.error(`❌ [${source}] Transação não encontrada: ${transacaoId}`)
+      pagamentosProcessados.delete(transacaoId)
+      return { success: false, message: 'Transação não encontrada' }
     }
 
-    // VERIFICAÇÃO CRÍTICA: Se já está confirmada, não processa novamente
-    if (transacao.status === "confirmado") {
+    if (transacao.status === 'confirmado') {
       console.log(
-        `⚠️ [${source}] Transação ${transacaoId} já estava confirmada. Ignorando.`,
-      );
-      pagamentosProcessados.delete(transacaoId);
+        `⚠️ [${source}] Transação ${transacaoId} já estava confirmada. Ignorando.`
+      )
+      pagamentosProcessados.delete(transacaoId)
       return {
         success: true,
-        message: "Transação já confirmada",
-        jaProcessado: true,
-      };
+        message: 'Transação já confirmada',
+        jaProcessado: true
+      }
     }
 
     console.log(
-      `💰 [${source}] Processando pagamento para transação: ${transacaoId}`,
-    );
+      `💰 [${source}] Processando pagamento para transação: ${transacaoId}`
+    )
 
-    // Atualizar transação
-    transacao.status = "confirmado";
-    transacao.dataConfirmacao = new Date();
-    await transacao.save();
+    transacao.status = 'confirmado'
+    transacao.dataConfirmacao = new Date()
+    await transacao.save()
 
-    // Buscar rodada
-    const rodada = await Rodada.findById(transacao.rodada);
+    const rodada = await Rodada.findById(transacao.rodada)
     if (!rodada) {
-      console.error(
-        `❌ [${source}] Rodada não encontrada: ${transacao.rodada}`,
-      );
-      pagamentosProcessados.delete(transacaoId);
-      return { success: false, message: "Rodada não encontrada" };
+      console.error(`❌ [${source}] Rodada não encontrada: ${transacao.rodada}`)
+      pagamentosProcessados.delete(transacaoId)
+      return { success: false, message: 'Rodada não encontrada' }
     }
 
-    // Encontrar participante
     const participante = rodada.participantes.find(
-      (p) => p.usuario.toString() === transacao.pagador.toString(),
-    );
-
+      p => p.usuario.toString() === transacao.pagador.toString()
+    )
     if (!participante) {
-      console.error(`❌ [${source}] Participante não encontrado na rodada`);
-      pagamentosProcessados.delete(transacaoId);
-      return { success: false, message: "Participante não encontrado" };
+      console.error(`❌ [${source}] Participante não encontrado na rodada`)
+      pagamentosProcessados.delete(transacaoId)
+      return { success: false, message: 'Participante não encontrado' }
     }
 
-    // VERIFICAÇÃO CRÍTICA: Se participante já está pago, não processa novamente
     if (participante.depositoConfirmado === true) {
       console.log(
-        `⚠️ [${source}] Participante ${participante.usuario} já estava marcado como pago. Ignorando.`,
-      );
-      pagamentosProcessados.delete(transacaoId);
+        `⚠️ [${source}] Participante já estava marcado como pago. Ignorando.`
+      )
+      pagamentosProcessados.delete(transacaoId)
       return {
         success: true,
-        message: "Participante já pago",
-        jaProcessado: true,
-      };
+        message: 'Participante já pago',
+        jaProcessado: true
+      }
     }
 
-    // Marcar participante como pago
-    participante.depositoConfirmado = true;
-    participante.dataDeposito = new Date();
+    participante.depositoConfirmado = true
+    participante.dataDeposito = new Date()
 
-    // Contar vermelhos pagos CORRETAMENTE
-    const vermelhos = rodada.participantes.filter((p) => p.cor === "vermelho");
-    const vermelhosPagos = vermelhos.filter(
-      (v) => v.depositoConfirmado === true,
-    );
+    const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho')
+    const vermelhosPagos = vermelhos.filter(v => v.depositoConfirmado === true)
+    rodada.totalDepositosConfirmados = vermelhosPagos.length
+    await rodada.save()
 
-    // Atualizar total de depósitos confirmados
-    rodada.totalDepositosConfirmados = vermelhosPagos.length;
-
-    await rodada.save();
+    // REMOVER DA FILA DE ESPERA (se estiver nela)
+    const usuario = await User.findById(transacao.pagador)
+    if (usuario && usuario.aguardandoVermelho) {
+      usuario.aguardandoVermelho = false
+      usuario.posicaoFila = null
+      usuario.dataEntradaFila = null
+      usuario.rodadaBloqueada = null
+      await usuario.save()
+      console.log(
+        `✅ [${source}] Usuário ${usuario.nome} removido da fila após pagamento`
+      )
+    }
 
     console.log(
-      `✅ [${source}] Participante ${participante.usuario} marcado como pago`,
-    );
+      `✅ [${source}] Participante ${participante.usuario} marcado como pago`
+    )
     console.log(
-      `📊 [${source}] Progresso: ${vermelhosPagos.length}/${vermelhos.length}`,
-    );
+      `📊 [${source}] Progresso: ${vermelhosPagos.length}/${vermelhos.length}`
+    )
 
-    // Verificar se todos pagaram (8 vermelhos)
     if (vermelhosPagos.length === vermelhos.length && vermelhos.length === 8) {
-      console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`);
-
-      // Atualizar flag da rodada
+      console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`)
       if (!rodada.todosDepositaram) {
-        rodada.todosDepositaram = true;
-        rodada.dataTodosDepositaram = new Date();
-        await rodada.save();
-        console.log(`✅ [${source}] Rodada marcada como "todos depositaram"`);
+        rodada.todosDepositaram = true
+        rodada.dataTodosDepositaram = new Date()
+        await rodada.save()
       }
-
-      // Chamar o serviço de avanço da rodada
       try {
-        await RodadaService.avancarRodada(rodada._id);
+        await RodadaService.avancarRodada(rodada._id)
         console.log(
-          `✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`,
-        );
+          `✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`
+        )
       } catch (err) {
-        console.error(`❌ [${source}] Erro ao avançar rodada:`, err);
+        console.error(`❌ [${source}] Erro ao avançar rodada:`, err)
       }
     }
 
-    // Limpar do cache após 10 minutos (tempo suficiente para evitar duplicatas)
-    setTimeout(
-      () => {
-        pagamentosProcessados.delete(transacaoId);
-        console.log(
-          `🧹 [${source}] Cache do pagamento ${transacaoId} removido após 10 minutos`,
-        );
-      },
-      10 * 60 * 1000,
-    );
+    setTimeout(() => {
+      pagamentosProcessados.delete(transacaoId)
+      console.log(
+        `🧹 [${source}] Cache do pagamento ${transacaoId} removido após 10 minutos`
+      )
+    }, 10 * 60 * 1000)
 
     return {
       success: true,
-      message: "Pagamento processado",
-      progresso: `${vermelhosPagos.length}/${vermelhos.length}`,
-    };
+      message: 'Pagamento processado',
+      progresso: `${vermelhosPagos.length}/${vermelhos.length}`
+    }
   } catch (error) {
     console.error(
       `❌ [${source}] Erro ao processar pagamento ${transacaoId}:`,
-      error,
-    );
-    // Remover do cache em caso de erro para permitir tentativa futura
-    pagamentosProcessados.delete(transacaoId);
-    throw error;
+      error
+    )
+    pagamentosProcessados.delete(transacaoId)
+    throw error
   }
 }
 
-/**
- * Cria um QR Code PIX para o vermelho pagar (API v1)
- * Endpoint: POST /v1/pixQrCode/create
- */
+// ===========================================
+// CRIAR COBRANÇA PIX
+// ===========================================
 exports.criarCobrancaPix = async (req, res) => {
   try {
-    const { transacaoId } = req.body;
+    const { transacaoId } = req.body
+    if (!transacaoId)
+      return res
+        .status(400)
+        .json({ success: false, error: 'transacaoId é obrigatório' })
 
-    if (!transacaoId) {
-      return res.status(400).json({
-        success: false,
-        error: "transacaoId é obrigatório",
-      });
-    }
-
-    // Buscar transação com dados completos
     const transacao = await Transacao.findById(transacaoId)
-      .populate("pagador", "nome email")
-      .populate("rodada", "nome");
+      .populate('pagador', 'nome email')
+      .populate('rodada', 'nome')
+    if (!transacao)
+      return res
+        .status(404)
+        .json({ success: false, error: 'Transação não encontrada' })
+    if (transacao.status === 'confirmado')
+      return res
+        .status(400)
+        .json({ success: false, error: 'Esta transação já foi paga' })
 
-    if (!transacao) {
-      return res.status(404).json({
-        success: false,
-        error: "Transação não encontrada",
-      });
-    }
-
-    // VERIFICAR SE JÁ FOI PAGA
-    if (transacao.status === "confirmado") {
-      return res.status(400).json({
-        success: false,
-        error: "Esta transação já foi paga",
-      });
-    }
-
-    // ===========================================
-    // VALOR CORRETO: R$ 150,00 (SEM TAXA SEPARADA)
-    // ===========================================
-    const valorCorreto = VALOR_VERMELHO; // 150.00
-    const valorCentavos = Math.round(valorCorreto * 100); // 15000
-
+    const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
       amount: valorCentavos,
       description: `Giro Premiado - ${transacao.pagador.nome}`,
       expiresIn: 3600,
-      metadata: {
-        externalId: transacao._id.toString(),
-      },
-    };
-
-    console.log("📤 Enviando payload:", JSON.stringify(payload, null, 2));
-
-    // Criar QR Code PIX na AbacatePay
-    const response = await abacate.post("/pixQrCode/create", payload);
-
-    console.log(
-      "📥 Resposta da AbacatePay:",
-      JSON.stringify(response.data, null, 2),
-    );
-
+      metadata: { externalId: transacao._id.toString() }
+    }
+    const response = await abacate.post('/pixQrCode/create', payload)
     const {
       id: cobrancaId,
       brCode,
       brCodeBase64,
-      expiresAt,
-    } = response.data.data;
+      expiresAt
+    } = response.data.data
 
-    // Salvar referência da cobrança com valor correto
-    transacao.cobrancaId = cobrancaId;
-    transacao.valorPago = valorCorreto; // 150.00
+    transacao.cobrancaId = cobrancaId
+    transacao.valorPago = VALOR_VERMELHO
     transacao.metadata = {
       ...(transacao.metadata || {}),
       cobrancaCriadaEm: new Date().toISOString(),
       expiraEm: expiresAt,
-      tipo: "pix_qrcode_v1",
+      tipo: 'pix_qrcode_v1',
       renovacoes: 0,
-      valorOriginal: valorCorreto,
-    };
-    await transacao.save();
+      valorOriginal: VALOR_VERMELHO
+    }
+    await transacao.save()
 
-    console.log(
-      `💰 PIX gerado para transação ${transacaoId}: R$ ${valorCorreto}`,
-    );
-
-    // ===========================================
-    // 🔥 ENVIAR QR CODE POR E-MAIL PARA O VERMELHO
-    // ===========================================
+    // Envio de email (opcional)
     try {
-      const emailController = require("./emailController");
-      const User = require("../models/User");
-
-      const usuario = await User.findById(transacao.pagador);
-      if (usuario && usuario.email) {
-        // Verificar se a função existe no emailController
-        if (typeof emailController.enviarEmailQrCodePix === "function") {
-          await emailController.enviarEmailQrCodePix(
-            usuario,
-            transacao,
-            brCode,
-            brCodeBase64,
-            valorCorreto,
-            transacao.rodada,
-          );
-          console.log(`📧 Email com QR Code enviado para ${usuario.email}`);
-        } else {
-          console.log(
-            "⚠️ Função enviarEmailQrCodePix não encontrada no emailController",
-          );
-        }
+      const emailController = require('./emailController')
+      const usuario = await User.findById(transacao.pagador)
+      if (
+        usuario &&
+        usuario.email &&
+        typeof emailController.enviarEmailQrCodePix === 'function'
+      ) {
+        await emailController.enviarEmailQrCodePix(
+          usuario,
+          transacao,
+          brCode,
+          brCodeBase64,
+          VALOR_VERMELHO,
+          transacao.rodada
+        )
+        console.log(`📧 Email com QR Code enviado para ${usuario.email}`)
       }
     } catch (emailError) {
-      console.error("❌ Erro ao enviar email com QR Code:", emailError.message);
-      // Não interrompe o fluxo principal
+      console.error('❌ Erro ao enviar email com QR Code:', emailError.message)
     }
 
     res.json({
       success: true,
       qrCode: brCode,
       qrCodeImage: brCodeBase64,
-      valor: valorCorreto,
+      valor: VALOR_VERMELHO,
       expiraEm: expiresAt,
       transacaoId: transacao._id,
       cobrancaId,
-      renovacoes: 0,
-    });
+      renovacoes: 0
+    })
   } catch (error) {
-    console.error("❌ Erro ao criar QR Code PIX:", error);
-
-    if (error.response) {
-      console.error("❌ Resposta de erro:", {
-        status: error.response.status,
-        data: error.response.data,
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error:
-        error.response?.data?.error || "Erro ao gerar PIX. Tente novamente.",
-    });
+    console.error('❌ Erro ao criar QR Code PIX:', error)
+    res
+      .status(500)
+      .json({
+        success: false,
+        error:
+          error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
+      })
   }
-};
+}
 
-/**
- * Verifica o status de um QR Code PIX (API v1)
- * E ATUALIZA A TRANSAÇÃO E A RODADA SE ESTIVER PAGA
- */
+// ===========================================
+// VERIFICAR STATUS
+// ===========================================
 exports.verificarStatus = async (req, res) => {
   try {
-    const { transacaoId } = req.params;
+    const { transacaoId } = req.params
+    const transacao = await Transacao.findById(transacaoId)
+    if (!transacao)
+      return res
+        .status(404)
+        .json({ success: false, error: 'Transação não encontrada' })
 
-    const transacao = await Transacao.findById(transacaoId);
-    if (!transacao) {
-      return res.status(404).json({
-        success: false,
-        error: "Transação não encontrada",
-      });
+    let expirado = false
+    if (
+      transacao.metadata?.expiraEm &&
+      new Date() > new Date(transacao.metadata.expiraEm)
+    ) {
+      expirado = true
     }
 
-    // Se já está confirmada, retorna direto
-    if (transacao.status === "confirmado") {
+    if (transacao.status === 'confirmado') {
       return res.json({
         success: true,
         status: transacao.status,
         confirmadoEm: transacao.dataConfirmacao,
         cobrancaId: transacao.cobrancaId,
-      });
+        expirado
+      })
     }
 
-    // Consultar AbacatePay se tiver cobrancaId
     if (transacao.cobrancaId) {
       try {
         const response = await abacate.get(`/pixQrCode/check`, {
-          params: { id: transacao.cobrancaId },
-        });
-
-        console.log("📥 Status do QR Code:", response.data);
-
+          params: { id: transacao.cobrancaId }
+        })
         const statusApi =
           response.data.data?.status?.toUpperCase?.() ||
-          response.data.data?.status;
-
-        // Se pagamento foi confirmado na API
+          response.data.data?.status
         if (
-          statusApi === "PAID" ||
-          statusApi === "COMPLETED" ||
-          statusApi === "CONFIRMED"
+          statusApi === 'PAID' ||
+          statusApi === 'COMPLETED' ||
+          statusApi === 'CONFIRMED'
         ) {
-          console.log(`💰 Pagamento detectado para transação ${transacaoId}`);
-
-          // USAR A FUNÇÃO COM CONTROLE DE DUPLICIDADE
-          const result = await processarPagamentoComControle(
-            transacaoId,
-            "verificarStatus",
-          );
-
-          if (result.jaProcessado) {
-            console.log(
-              `⚠️ Pagamento ${transacaoId} já foi processado anteriormente`,
-            );
-          }
+          await processarPagamentoComControle(transacaoId, 'verificarStatus')
         }
       } catch (apiError) {
-        console.error("❌ Erro ao consultar status:", apiError.message);
-        if (apiError.response?.status === 404) {
-          console.log("⏰ QR Code não encontrado (possivelmente expirado)");
-        }
+        console.error('❌ Erro ao consultar status:', apiError.message)
       }
     }
 
-    // Buscar transação atualizada após possível processamento
-    const transacaoAtualizada = await Transacao.findById(transacaoId);
-
+    const transacaoAtualizada = await Transacao.findById(transacaoId)
+    const finalExpirado =
+      transacaoAtualizada.metadata?.expiraEm &&
+      new Date() > new Date(transacaoAtualizada.metadata.expiraEm)
     res.json({
       success: true,
       status: transacaoAtualizada.status,
       confirmadoEm: transacaoAtualizada.dataConfirmacao,
       cobrancaId: transacaoAtualizada.cobrancaId,
-    });
+      expirado: finalExpirado
+    })
   } catch (error) {
-    console.error("❌ Erro ao verificar status:", error);
-    res.status(500).json({
-      success: false,
-      error: "Erro ao verificar status",
-    });
+    console.error('❌ Erro ao verificar status:', error)
+    res.status(500).json({ success: false, error: 'Erro ao verificar status' })
   }
-};
+}
 
-/**
- * Renova um QR Code PIX expirado para a mesma transação
- */
+// ===========================================
+// RENOVAR COBRANÇA
+// ===========================================
 exports.renovarCobrancaPix = async (req, res) => {
   try {
-    const { transacaoId } = req.body;
+    const { transacaoId } = req.body
+    if (!transacaoId)
+      return res
+        .status(400)
+        .json({ success: false, error: 'transacaoId é obrigatório' })
 
-    if (!transacaoId) {
-      return res.status(400).json({
-        success: false,
-        error: "transacaoId é obrigatório",
-      });
-    }
-
-    // Buscar transação
     const transacao = await Transacao.findById(transacaoId).populate(
-      "pagador",
-      "nome email",
-    );
+      'pagador',
+      'nome email'
+    )
+    if (!transacao)
+      return res
+        .status(404)
+        .json({ success: false, error: 'Transação não encontrada' })
+    if (transacao.status === 'confirmado')
+      return res
+        .status(400)
+        .json({ success: false, error: 'Esta transação já foi paga' })
 
-    if (!transacao) {
-      return res.status(404).json({
-        success: false,
-        error: "Transação não encontrada",
-      });
-    }
-
-    // Verificar se já foi paga
-    if (transacao.status === "confirmado") {
-      return res.status(400).json({
-        success: false,
-        error: "Esta transação já foi paga",
-      });
-    }
-
-    // ===========================================
-    // VALOR CORRETO: R$ 150,00 (MESMO NA RENOVAÇÃO)
-    // ===========================================
-    const valorCorreto = VALOR_VERMELHO; // 150.00
-    const valorCentavos = Math.round(valorCorreto * 100); // 15000
-
-    console.log("💰 Renovação - valor correto:", valorCorreto);
-    console.log("💰 Renovação - valorCentavos:", valorCentavos);
-
-    // Criar NOVO QR Code na AbacatePay
+    const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
       amount: valorCentavos,
       description: `Giro Premiado - ${transacao.pagador.nome}`,
       expiresIn: 3600,
-      metadata: {
-        externalId: transacao._id.toString(),
-      },
-    };
-
-    console.log("📤 Renovando PIX para transação:", transacaoId);
-    console.log("📤 Payload renovação:", JSON.stringify(payload, null, 2));
-
-    const response = await abacate.post("/pixQrCode/create", payload);
+      metadata: { externalId: transacao._id.toString() }
+    }
+    const response = await abacate.post('/pixQrCode/create', payload)
     const {
       id: novaCobrancaId,
       brCode,
       brCodeBase64,
-      expiresAt,
-    } = response.data.data;
+      expiresAt
+    } = response.data.data
 
-    // Calcular renovacoes
-    const renovacoes = (transacao.metadata?.renovacoes || 0) + 1;
-
-    // Atualizar transação com nova cobrança e GARANTIR valor correto
-    transacao.valorPago = valorCorreto;
-    transacao.cobrancaId = novaCobrancaId;
+    const renovacoes = (transacao.metadata?.renovacoes || 0) + 1
+    transacao.valorPago = VALOR_VERMELHO
+    transacao.cobrancaId = novaCobrancaId
     transacao.metadata = {
       ...(transacao.metadata || {}),
       cobrancaRenovadaEm: new Date().toISOString(),
       expiraEm: expiresAt,
       renovacoes,
-      valorCorreto: valorCorreto,
+      valorCorreto: VALOR_VERMELHO,
       historicoRenovacoes: [
         ...(transacao.metadata?.historicoRenovacoes || []),
         {
           data: new Date().toISOString(),
           cobrancaId: novaCobrancaId,
           expiraEm: expiresAt,
-          valor: valorCorreto,
-        },
-      ],
-    };
-
-    await transacao.save();
-
-    console.log(
-      `💰 PIX renovado para transação ${transacaoId} (renovação #${renovacoes}) - R$ ${valorCorreto}`,
-    );
+          valor: VALOR_VERMELHO
+        }
+      ]
+    }
+    await transacao.save()
 
     res.json({
       success: true,
       qrCode: brCode,
       qrCodeImage: brCodeBase64,
-      valor: valorCorreto,
+      valor: VALOR_VERMELHO,
       expiraEm: expiresAt,
       transacaoId: transacao._id,
       cobrancaId: novaCobrancaId,
-      renovacoes,
-    });
+      renovacoes
+    })
   } catch (error) {
-    console.error("❌ Erro ao renovar PIX:", error);
+    console.error('❌ Erro ao renovar PIX:', error)
+    res
+      .status(500)
+      .json({
+        success: false,
+        error:
+          error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
+      })
+  }
+}
 
-    if (error.response) {
-      console.error("❌ Resposta de erro da AbacatePay:", {
-        status: error.response.status,
-        data: error.response.data,
-      });
+// ===========================================
+// CANCELAR EXPIRADO (chamado pelo frontend)
+// ===========================================
+exports.cancelarExpirado = async (req, res) => {
+  const { transacaoId } = req.body
+  const usuarioId = req.usuario.id
+
+  try {
+    const transacao = await Transacao.findById(transacaoId)
+    if (!transacao)
+      return res.status(404).json({ error: 'Transação não encontrada' })
+    if (transacao.status === 'confirmado')
+      return res.status(400).json({ error: 'Transação já foi paga' })
+
+    const expiraEm = transacao.metadata?.expiraEm
+    if (expiraEm && new Date() < new Date(expiraEm)) {
+      return res.status(400).json({ error: 'QR Code ainda não expirou' })
     }
 
-    res.status(500).json({
-      success: false,
-      error:
-        error.response?.data?.error || "Erro ao renovar PIX. Tente novamente.",
-    });
+    const rodada = await Rodada.findOne({
+      'participantes.usuario': usuarioId,
+      'participantes.cor': 'vermelho',
+      'participantes.transacaoId': transacaoId
+    })
+    if (!rodada)
+      return res
+        .status(404)
+        .json({ error: 'Rodada não encontrada para este usuário' })
+
+    rodada.participantes = rodada.participantes.filter(
+      p => p.transacaoId !== transacaoId
+    )
+    await rodada.save()
+
+    transacao.status = 'cancelada_expirada'
+    await transacao.save()
+
+    const usuario = await User.findById(usuarioId)
+    if (!usuario.aguardandoVermelho) {
+      usuario.aguardandoVermelho = true
+      usuario.rodadaBloqueada = rodada._id
+      usuario.dataEntradaFila = new Date()
+      const ultimoNaFila = await User.findOne({
+        aguardandoVermelho: true
+      }).sort('-posicaoFila')
+      usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1
+      await usuario.save()
+      console.log(
+        `✅ Usuário ${usuario.nome} removido da rodada ${rodada.nome} e colocado na fila (posição ${usuario.posicaoFila})`
+      )
+    }
+
+    res.json({
+      success: true,
+      message: 'Participante removido e colocado na fila de espera'
+    })
+  } catch (error) {
+    console.error('Erro no cancelarExpirado:', error)
+    res.status(500).json({ error: 'Erro interno ao processar expiração' })
   }
-};
+}
 
 // ===========================================
-// EXPORTAR A FUNÇÃO PARA USO NO WEBHOOK
+// PROCESSAR TRANSAÇÕES EXPIRADAS (JOB)
 // ===========================================
+async function processarTransacoesExpiradas () {
+  const agora = new Date()
+  const transacoesExpiradas = await Transacao.find({
+    status: 'pendente',
+    'metadata.expiraEm': { $lt: agora }
+  }).populate('pagador')
+
+  for (const transacao of transacoesExpiradas) {
+    try {
+      const usuarioId = transacao.pagador._id
+      const rodada = await Rodada.findOne({
+        'participantes.usuario': usuarioId,
+        'participantes.cor': 'vermelho',
+        'participantes.transacaoId': transacao._id
+      })
+      if (!rodada) continue
+
+      rodada.participantes = rodada.participantes.filter(
+        p => p.transacaoId !== transacao._id
+      )
+      await rodada.save()
+
+      transacao.status = 'cancelada_expirada'
+      await transacao.save()
+
+      const usuario = await User.findById(usuarioId)
+      if (!usuario.aguardandoVermelho) {
+        usuario.aguardandoVermelho = true
+        usuario.rodadaBloqueada = rodada._id
+        usuario.dataEntradaFila = new Date()
+        const ultimoNaFila = await User.findOne({
+          aguardandoVermelho: true
+        }).sort('-posicaoFila')
+        usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1
+        await usuario.save()
+      }
+      console.log(
+        `[JOB] Transação ${transacao._id} expirada - usuário ${usuario.nome} removido`
+      )
+    } catch (err) {
+      console.error(`[JOB] Erro ao processar expiração ${transacao._id}:`, err)
+    }
+  }
+}
+
 module.exports = {
   criarCobrancaPix: exports.criarCobrancaPix,
   verificarStatus: exports.verificarStatus,
   renovarCobrancaPix: exports.renovarCobrancaPix,
   processarPagamentoComControle,
-};
+  cancelarExpirado: exports.cancelarExpirado,
+  processarTransacoesExpiradas
+}

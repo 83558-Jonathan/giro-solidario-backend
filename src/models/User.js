@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose')
+const bcrypt = require('bcryptjs')
 
 const userSchema = new mongoose.Schema({
   nome: { type: String, required: true },
@@ -7,7 +7,11 @@ const userSchema = new mongoose.Schema({
   telefone: { type: String, required: true },
   cpf: { type: String, required: true, unique: true },
   chavePix: { type: String, required: true },
-  tipoChavePix: { type: String, enum: ['cpf', 'email', 'telefone', 'aleatoria'], required: true },
+  tipoChavePix: {
+    type: String,
+    enum: ['cpf', 'email', 'telefone', 'aleatoria'],
+    required: true
+  },
   senha: { type: String, required: true },
   role: { type: String, default: 'user' },
   status: { type: String, default: 'ativo' },
@@ -19,31 +23,36 @@ const userSchema = new mongoose.Schema({
 
   // Campo para marcar usuários que estão aguardando vaga de vermelho
   aguardandoVermelho: { type: Boolean, default: false },
-  
-  // NOVOS CAMPOS PARA FILA FIFO
+
+  // Fila FIFO
   posicaoFila: { type: Number, default: null },
   dataEntradaFila: { type: Date, default: null },
 
+  // NOVO: ID da rodada da qual foi removido (para não realocar nela)
+  rodadaBloqueada: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Rodada',
+    default: null
+  },
+
   saldo: { type: Number, default: 0 },
   totalGanho: { type: Number, default: 0 },
-
   saldoPremio: { type: Number, default: 0 },
 
-  // Campos para recuperacao de senha
+  // Recuperação de senha
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
 
   createdAt: { type: Date, default: Date.now }
-});
+})
 
-// Metodo para comparar senha
 userSchema.methods.compararSenha = async function (senha) {
-  return await bcrypt.compare(senha, this.senha);
-};
+  return await bcrypt.compare(senha, this.senha)
+}
 
-// Gerar codigo de convite
 userSchema.methods.gerarCodigoConvite = function () {
-  this.codigoConvite = 'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-};
+  this.codigoConvite =
+    'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase()
+}
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('User', userSchema)

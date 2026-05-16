@@ -162,7 +162,6 @@ class RodadaService {
       console.log(`   Usuario ID: ${usuarioId}`)
       console.log(`   Indicador ID: ${indicadorId || 'nenhum'}`)
 
-      // ✅ VERIFICAÇÃO GLOBAL: usuário já está em alguma rodada ativa?
       const estaEmRodadaAtiva = await this.usuarioEstaEmRodadaAtiva(usuarioId)
       if (estaEmRodadaAtiva) {
         console.log(
@@ -282,9 +281,6 @@ class RodadaService {
       console.log(`\nVERIFICANDO COMPLETUDE DA RODADA:`)
       console.log(`   Participantes agora: ${rodada.participantes.length}/15`)
 
-      // ===========================================
-      // CORREÇÃO AQUI - Bloco modificado
-      // ===========================================
       if (rodada.participantes.length === 15) {
         console.log(`Rodada ${rodada.nome} completou 15 participantes!`)
 
@@ -310,7 +306,6 @@ class RodadaService {
           }`
         )
 
-        // 🔥🔥🔥 CORREÇÃO PRINCIPAL 🔥🔥🔥
         // Se a rodada já tem estrutura (veio da progressão), criar transações AGORA
         if (temEstruturaPreDefinida) {
           console.log(
@@ -362,7 +357,6 @@ class RodadaService {
       const verdeId = rodada.verde
       if (!verdeId) throw new Error('Verde nao definido na rodada')
 
-      // ✅ VALOR CORRETO: R$ 150,00
       const valor = 150
 
       const transacao = new Transacao({
@@ -919,6 +913,18 @@ class RodadaService {
           continue
         }
 
+        // 🔥 VERIFICAÇÃO DO BLOQUEIO: não alocar na mesma rodada da qual foi removido
+        if (
+          usuarioAtual.rodadaBloqueada &&
+          usuarioAtual.rodadaBloqueada.toString() === rodada._id.toString()
+        ) {
+          console.log(
+            `         ⛔ Usuário ${usuarioAtual.nome} está BLOQUEADO para esta rodada (removido anteriormente). Avançando na fila...`
+          )
+          indexFila++
+          continue
+        }
+
         const emRodadaAtiva = await this.usuarioEstaEmRodadaAtiva(usuario._id)
         if (emRodadaAtiva) {
           console.log(
@@ -927,6 +933,7 @@ class RodadaService {
           usuarioAtual.aguardandoVermelho = false
           usuarioAtual.posicaoFila = null
           usuarioAtual.dataEntradaFila = null
+          usuarioAtual.rodadaBloqueada = null
           await usuarioAtual.save()
           indexFila++
           continue
@@ -936,7 +943,6 @@ class RodadaService {
         const usuarioJaNaRodada = rodada.participantes.some(
           p => p.usuario.toString() === usuario._id.toString()
         )
-
         if (usuarioJaNaRodada) {
           console.log(
             `         ⚠️ Usuário já está nesta rodada. Removendo da fila...`
@@ -944,6 +950,7 @@ class RodadaService {
           usuarioAtual.aguardandoVermelho = false
           usuarioAtual.posicaoFila = null
           usuarioAtual.dataEntradaFila = null
+          usuarioAtual.rodadaBloqueada = null
           await usuarioAtual.save()
           indexFila++
           continue
@@ -957,9 +964,12 @@ class RodadaService {
             null
           )
 
+          // 🔥 LIMPAR O BLOQUEIO APÓS ALOCAR (pois agora ele está na rodada)
+          usuarioAtual.rodadaBloqueada = null
+          await usuarioAtual.save()
+
           // VERIFICAR SE TEM SALDO PARA PAGAR AUTOMATICAMENTE
           const usuarioAlocado = await User.findById(usuario._id)
-
           if (usuarioAlocado && (usuarioAlocado.saldoPremio || 0) >= 150) {
             // 1. Cancelar qualquer saque pendente do usuário
             const SolicitacaoSaque = require('../models/SolicitacaoSaque')
@@ -973,10 +983,12 @@ class RodadaService {
                 'Cancelado por reentrada automática na fila'
               saquePendente.dataRecusa = new Date()
               await saquePendente.save()
-              console.log(`⏳ Saque pendente cancelado para ${usuario.nome}`)
+              console.log(
+                `⏳ Saque pendente cancelado para ${usuarioAlocado.nome}`
+              )
             }
 
-            // 2. Garantir que a transação existe (criar se não existir)
+            // 2. Garantir que a transação existe
             let transacao = await Transacao.findOne({
               pagador: usuario._id,
               rodada: rodada._id
@@ -998,7 +1010,6 @@ class RodadaService {
                 })
                 await transacao.save()
 
-                // Atualizar participante com transacaoId
                 const participante = rodadaAtual.participantes.find(
                   p => p.usuario.toString() === usuario._id.toString()
                 )
@@ -1007,7 +1018,7 @@ class RodadaService {
                   await rodadaAtual.save()
                 }
                 console.log(
-                  `✅ Transação criada para ${usuario.nome} na rodada ${rodadaAtual.nome}`
+                  `✅ Transação criada para ${usuarioAlocado.nome} na rodada ${rodadaAtual.nome}`
                 )
               }
             }
@@ -1024,7 +1035,6 @@ class RodadaService {
               }
               await transacao.save()
 
-              // Recarregar rodada e marcar participante como pago
               const rodadaAtualizada = await Rodada.findById(rodada._id)
               const participante = rodadaAtualizada.participantes.find(
                 p => p.usuario.toString() === usuario._id.toString()
@@ -1045,17 +1055,15 @@ class RodadaService {
               rodadaAtualizada.totalDepositosConfirmados = vermelhosPagos.length
               await rodadaAtualizada.save()
 
-              // Descontar saldo do usuário
               const novoSaldo = (usuarioAlocado.saldoPremio || 0) - 150
               await User.findByIdAndUpdate(usuario._id, {
                 $set: { saldoPremio: novoSaldo }
               })
 
               console.log(
-                `💰 Usuário ${usuario.nome} pagou automaticamente com saldo. Restante: R$ ${novoSaldo}`
+                `💰 Usuário ${usuarioAlocado.nome} pagou automaticamente com saldo. Restante: R$ ${novoSaldo}`
               )
 
-              // Verificar se a rodada avançou
               if (
                 vermelhosPagos.length === vermelhos.length &&
                 vermelhos.length === 8
@@ -1065,7 +1073,7 @@ class RodadaService {
             }
           }
 
-          // Remover da fila
+          // Remover da fila (já foi feito acima, mas garantimos)
           usuarioAtual.aguardandoVermelho = false
           usuarioAtual.posicaoFila = null
           usuarioAtual.dataEntradaFila = null
@@ -1772,7 +1780,7 @@ class RodadaService {
       }
 
       // ===========================================
-      // 2. SE USUÁRIO ESTÁ NA FILA, TENTAR ALOCAR IMEDIATAMENTE
+      // 2. SE USUÁRIO ESTÁ NA FILA, TENTAR ALOCAR IMEDIATAMENTE (respeitando bloqueio)
       // ===========================================
       if (usuario.aguardandoVermelho) {
         let rodadaExistente = await Rodada.findOne({
@@ -1814,6 +1822,18 @@ class RodadaService {
               ]
             }
           }).sort({ createdAt: 1 })
+        }
+
+        // 🔥 VERIFICAR SE A RODADA ENCONTRADA ESTÁ BLOQUEADA PARA ESTE USUÁRIO
+        if (
+          rodadaExistente &&
+          usuario.rodadaBloqueada &&
+          usuario.rodadaBloqueada.toString() === rodadaExistente._id.toString()
+        ) {
+          console.log(
+            `⛔ Usuário está bloqueado para a rodada ${rodadaExistente.nome}. Ignorando alocação imediata.`
+          )
+          rodadaExistente = null // força a permanência na fila
         }
 
         if (rodadaExistente) {

@@ -1,17 +1,13 @@
-const express = require('express');
-const router = express.Router();
-const pixController = require('../controllers/pixController');
-const authMiddleware = require('../middleware/authMiddleware');
+const express = require('express')
+const router = express.Router()
+const pixController = require('../controllers/pixController')
+const authMiddleware = require('../middleware/authMiddleware')
 
-// Todas as rotas de PIX requerem autenticação
-router.use(authMiddleware);
+router.use(authMiddleware)
 
-// Criar cobrança PIX para uma transação
-router.post('/criar-cobranca', pixController.criarCobrancaPix);
+router.post('/criar-cobranca', pixController.criarCobrancaPix)
+router.get('/status/:transacaoId', pixController.verificarStatus)
+router.post('/renovar-cobranca', pixController.renovarCobrancaPix)
+router.post('/cancelar-expirado', pixController.cancelarExpirado)
 
-// Verificar status de uma transação
-router.get('/status/:transacaoId', pixController.verificarStatus);
-
-router.post('/renovar-cobranca', authMiddleware, pixController.renovarCobrancaPix);
-
-module.exports = router;
+module.exports = router
