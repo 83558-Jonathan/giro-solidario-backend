@@ -1,6 +1,6 @@
 const express = require('express')
-const http = require('http') // 👈 1. Importar http
-const socketIo = require('socket.io') // 👈 2. Importar socket.io
+const http = require('http')
+const socketIo = require('socket.io')
 const mongoose = require('mongoose')
 const cors = require('cors')
 const helmet = require('helmet')
@@ -10,13 +10,13 @@ const rateLimit = require('express-rate-limit')
 require('dotenv').config()
 
 const app = express()
-const server = http.createServer(app) // 👈 3. Criar servidor HTTP
+const server = http.createServer(app)
 const PORT = process.env.PORT || 5001
 const criarAdmin = require('./src/scripts/seedAdmin')
 const RodadaService = require('./src/services/rodadaService')
-const ChatMessage = require('./src/models/ChatMessage') // 👈 4. Importar modelo
-const Rodada = require('./src/models/Rodada') // 👈 para validação
-const jwt = require('jsonwebtoken') // 👈 para autenticar o socket
+const ChatMessage = require('./src/models/ChatMessage')
+const Rodada = require('./src/models/Rodada')
+const jwt = require('jsonwebtoken')
 
 // ===========================================
 // ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA
@@ -245,19 +245,15 @@ io.on('connection', socket => {
       console.log(
         `📌 ${socket.usuario.nome} entrou na sala da rodada ${rodadaId}`
       )
-
-      // Enviar histórico das últimas 50 mensagens (pode ser feito via REST, mas aqui é opcional)
-      const historico = await ChatMessage.find({ rodadaId })
-        .sort({ createdAt: 1 })
-        .limit(50)
-      socket.emit('historico', historico)
+      // OBS: histórico carregado via REST (GET /api/chat/historico/:rodadaId)
+      // Não emitimos 'historico' via socket para evitar tráfego desnecessário
     } catch (error) {
       console.error('Erro ao entrar na sala:', error)
       socket.emit('erro', 'Erro ao carregar o chat')
     }
   })
 
-  // Sair da sala (importante para não receber mensagens desnecessárias)
+  // Sair da sala
   socket.on('sair-sala', rodadaId => {
     socket.leave(`rodada-${rodadaId}`)
     console.log(`🔴 ${socket.usuario.nome} saiu da sala da rodada ${rodadaId}`)
@@ -274,7 +270,6 @@ io.on('connection', socket => {
         return
       }
 
-      // Validar participação novamente (segurança)
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
         socket.emit('erro', 'Rodada não encontrada')
@@ -288,7 +283,6 @@ io.on('connection', socket => {
         return
       }
 
-      // Salvar no banco
       const novaMsg = new ChatMessage({
         rodadaId,
         usuarioId: socket.usuario.id,
@@ -299,7 +293,7 @@ io.on('connection', socket => {
       })
       await novaMsg.save()
 
-      // Emitir para todos na sala (incluindo o remetente)
+      // Broadcast para todos na sala (inclui o remetente)
       io.to(`rodada-${rodadaId}`).emit('mensagem', {
         _id: novaMsg._id,
         usuarioId: socket.usuario.id,
@@ -322,7 +316,7 @@ io.on('connection', socket => {
 })
 
 // ===========================================
-// ROTAS REST (adicionar rota do chat)
+// ROTAS REST
 // ===========================================
 app.use('/api/auth', require('./src/routes/auth.routes'))
 app.use('/api/users', require('./src/routes/user.routes'))
@@ -334,12 +328,10 @@ app.use('/api/webhook', require('./src/routes/webhook.routes'))
 app.use('/api/email', require('./src/routes/email.routes'))
 app.use('/api/admin', require('./src/routes/admin.routes'))
 app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'))
-
-// 👇 NOVA ROTA: histórico do chat (opcional, REST)
 app.use('/api/chat', require('./src/routes/chat.routes'))
 
 // ===========================================
-// ROTA DE TESTE E RAIZ (mantidas)
+// ROTA DE TESTE E RAIZ
 // ===========================================
 app.get('/api/health', (req, res) => {
   res.json({
@@ -349,7 +341,6 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-// Rota raiz
 app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
@@ -430,7 +421,7 @@ app.use((err, req, res, next) => {
   })
 })
 
-// 🔥 USAR `server.listen` em vez de `app.listen`
+// Inicialização do servidor
 server.listen(PORT, () => {
   console.log(`
   🚀 Servidor rodando na porta ${PORT}
