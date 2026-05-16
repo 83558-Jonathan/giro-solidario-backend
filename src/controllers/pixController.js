@@ -197,7 +197,9 @@ exports.criarCobrancaPix = async (req, res) => {
       expiraEm: expiresAt,
       tipo: 'pix_qrcode_v1',
       renovacoes: 0,
-      valorOriginal: VALOR_VERMELHO
+      valorOriginal: VALOR_VERMELHO,
+      qrCode: brCode, // 🔥 NOVO: salva o código PIX (texto)
+      qrCodeImage: brCodeBase64 // 🔥 NOVO: salva a imagem base64
     }
     await transacao.save()
 
@@ -236,13 +238,11 @@ exports.criarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao criar QR Code PIX:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
+    })
   }
 }
 
@@ -361,6 +361,8 @@ exports.renovarCobrancaPix = async (req, res) => {
       expiraEm: expiresAt,
       renovacoes,
       valorCorreto: VALOR_VERMELHO,
+      qrCode: brCode, // 🔥 NOVO: salva o código PIX (texto)
+      qrCodeImage: brCodeBase64, // 🔥 NOVO: salva a imagem base64
       historicoRenovacoes: [
         ...(transacao.metadata?.historicoRenovacoes || []),
         {
@@ -385,13 +387,11 @@ exports.renovarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao renovar PIX:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
+    })
   }
 }
 

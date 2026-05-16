@@ -1,24 +1,26 @@
-const express = require('express');
-const router = express.Router();
-const transacaoController = require('../controllers/transacaoController');
-const authMiddleware = require('../middleware/authMiddleware');
+const express = require('express')
+const router = express.Router()
+const transacaoController = require('../controllers/transacaoController')
+const authMiddleware = require('../middleware/authMiddleware')
 
 // Todas as rotas requerem autenticação
-router.use(authMiddleware);
+router.use(authMiddleware)
 
 // Minhas transações
-router.get('/minhas', transacaoController.minhasTransacoes);
+router.get('/minhas', transacaoController.minhasTransacoes)
 
 // Estatísticas de transações
-router.get('/estatisticas', transacaoController.estatisticas);
+router.get('/estatisticas', transacaoController.estatisticas)
 
 // Transações de uma rodada
-router.get('/rodada/:rodadaId', transacaoController.porRodada);
+router.get('/rodada/:rodadaId', transacaoController.porRodada)
 
 // Confirmar depósito
-router.post('/:transacaoId/confirmar', transacaoController.confirmarDeposito);
+router.post('/:transacaoId/confirmar', transacaoController.confirmarDeposito)
 
 // Cancelar transação
-router.post('/:transacaoId/cancelar', transacaoController.cancelarTransacao);
+router.post('/:transacaoId/cancelar', transacaoController.cancelarTransacao)
 
-module.exports = router;
+router.get('/:id', transacaoController.buscarTransacaoPorId)
+
+module.exports = router

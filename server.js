@@ -1,4 +1,6 @@
 const express = require('express')
+const http = require('http') // 👈 1. Importar http
+const socketIo = require('socket.io') // 👈 2. Importar socket.io
 const mongoose = require('mongoose')
 const cors = require('cors')
 const helmet = require('helmet')
@@ -8,12 +10,16 @@ const rateLimit = require('express-rate-limit')
 require('dotenv').config()
 
 const app = express()
+const server = http.createServer(app) // 👈 3. Criar servidor HTTP
 const PORT = process.env.PORT || 5001
 const criarAdmin = require('./src/scripts/seedAdmin')
 const RodadaService = require('./src/services/rodadaService')
+const ChatMessage = require('./src/models/ChatMessage') // 👈 4. Importar modelo
+const Rodada = require('./src/models/Rodada') // 👈 para validação
+const jwt = require('jsonwebtoken') // 👈 para autenticar o socket
 
 // ===========================================
-// ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA (ADICIONADO)
+// ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA
 // ===========================================
 setInterval(async () => {
   try {
@@ -22,7 +28,7 @@ setInterval(async () => {
   } catch (error) {
     console.error('[CRON] Erro na alocação periódica da fila:', error.message)
   }
-}, 30000) // 30 segundos
+}, 30000)
 
 // ===========================================
 // TRUST PROXY (IP real via Cloudflare)
@@ -173,7 +179,7 @@ mongoose
     console.log('✅ MongoDB Conectado')
     await criarAdmin().catch(err => console.error('Erro ao criar admin:', err))
 
-    // Iniciar job de expiração PIX (executa a cada 5 minutos)
+    // Iniciar job de expiração PIX
     require('./src/jobs/expiraPix')
     console.log('⏰ Job de expiração PIX agendado')
 
@@ -186,7 +192,137 @@ mongoose
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
 
 // ===========================================
-// ROTAS
+// SOCKET.IO (CHAT)
+// ===========================================
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+})
+
+// Middleware de autenticação para socket
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth.token
+  if (!token) return next(new Error('Autenticação necessária'))
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const usuario = await require('./src/models/User')
+      .findById(decoded.id)
+      .select('id nome email')
+    if (!usuario) return next(new Error('Usuário não encontrado'))
+    socket.usuario = usuario
+    next()
+  } catch (err) {
+    return next(new Error('Token inválido'))
+  }
+})
+
+io.on('connection', socket => {
+  console.log(`🟢 Usuário conectado: ${socket.usuario.nome} (${socket.id})`)
+
+  // Entrar na sala da rodada
+  socket.on('entrar-sala', async rodadaId => {
+    try {
+      const rodada = await Rodada.findById(rodadaId)
+      if (!rodada) {
+        socket.emit('erro', 'Rodada não encontrada')
+        return
+      }
+
+      // Verificar se o usuário é participante da rodada
+      const isParticipante = rodada.participantes.some(
+        p => p.usuario.toString() === socket.usuario.id
+      )
+      if (!isParticipante) {
+        socket.emit('erro', 'Você não tem permissão para entrar neste chat')
+        return
+      }
+
+      socket.join(`rodada-${rodadaId}`)
+      console.log(
+        `📌 ${socket.usuario.nome} entrou na sala da rodada ${rodadaId}`
+      )
+
+      // Enviar histórico das últimas 50 mensagens (pode ser feito via REST, mas aqui é opcional)
+      const historico = await ChatMessage.find({ rodadaId })
+        .sort({ createdAt: 1 })
+        .limit(50)
+      socket.emit('historico', historico)
+    } catch (error) {
+      console.error('Erro ao entrar na sala:', error)
+      socket.emit('erro', 'Erro ao carregar o chat')
+    }
+  })
+
+  // Sair da sala (importante para não receber mensagens desnecessárias)
+  socket.on('sair-sala', rodadaId => {
+    socket.leave(`rodada-${rodadaId}`)
+    console.log(`🔴 ${socket.usuario.nome} saiu da sala da rodada ${rodadaId}`)
+  })
+
+  // Receber nova mensagem
+  socket.on('nova-mensagem', async data => {
+    try {
+      const { rodadaId, mensagem } = data
+
+      if (!mensagem || mensagem.trim().length === 0) return
+      if (mensagem.length > 500) {
+        socket.emit('erro', 'Mensagem muito longa (máximo 500 caracteres)')
+        return
+      }
+
+      // Validar participação novamente (segurança)
+      const rodada = await Rodada.findById(rodadaId)
+      if (!rodada) {
+        socket.emit('erro', 'Rodada não encontrada')
+        return
+      }
+      const isParticipante = rodada.participantes.some(
+        p => p.usuario.toString() === socket.usuario.id
+      )
+      if (!isParticipante) {
+        socket.emit('erro', 'Você não tem permissão para enviar mensagens')
+        return
+      }
+
+      // Salvar no banco
+      const novaMsg = new ChatMessage({
+        rodadaId,
+        usuarioId: socket.usuario.id,
+        nome: socket.usuario.nome,
+        mensagem: mensagem.trim(),
+        tipo: 'texto',
+        createdAt: new Date()
+      })
+      await novaMsg.save()
+
+      // Emitir para todos na sala (incluindo o remetente)
+      io.to(`rodada-${rodadaId}`).emit('mensagem', {
+        _id: novaMsg._id,
+        usuarioId: socket.usuario.id,
+        nome: socket.usuario.nome,
+        mensagem: mensagem.trim(),
+        tipo: 'texto',
+        createdAt: novaMsg.createdAt
+      })
+    } catch (error) {
+      console.error('Erro ao enviar mensagem:', error)
+      socket.emit('erro', 'Erro ao enviar mensagem')
+    }
+  })
+
+  socket.on('disconnect', () => {
+    console.log(
+      `🔴 Usuário desconectado: ${socket.usuario.nome} (${socket.id})`
+    )
+  })
+})
+
+// ===========================================
+// ROTAS REST (adicionar rota do chat)
 // ===========================================
 app.use('/api/auth', require('./src/routes/auth.routes'))
 app.use('/api/users', require('./src/routes/user.routes'))
@@ -199,7 +335,12 @@ app.use('/api/email', require('./src/routes/email.routes'))
 app.use('/api/admin', require('./src/routes/admin.routes'))
 app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'))
 
-// Rota de teste
+// 👇 NOVA ROTA: histórico do chat (opcional, REST)
+app.use('/api/chat', require('./src/routes/chat.routes'))
+
+// ===========================================
+// ROTA DE TESTE E RAIZ (mantidas)
+// ===========================================
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -269,20 +410,7 @@ app.get('/', (req, res) => {
 
 // 404
 app.use((req, res) => {
-  res.status(404).json({
-    error: 'Rota nao encontrada',
-    availableEndpoints: [
-      '/',
-      '/api/health',
-      '/api/auth',
-      '/api/users',
-      '/api/rodadas',
-      '/api/transacoes',
-      '/api/indicacoes',
-      '/api/pix',
-      '/api/webhook/pix'
-    ]
-  })
+  res.status(404).json({ error: 'Rota nao encontrada' })
 })
 
 // Error handler global
@@ -291,23 +419,25 @@ app.use((err, req, res, next) => {
   if (err.timeout)
     return res
       .status(503)
-      .json({ error: 'Tempo limite da requisicao excedido' })
+      .json({ error: 'Tempo limite da requisição excedido' })
   if (err.code === 'ERR_RATE_LIMIT')
     return res
       .status(429)
-      .json({ error: 'Muitas requisicoes. Tente novamente mais tarde.' })
+      .json({ error: 'Muitas requisições. Tente novamente mais tarde.' })
   res.status(500).json({
     error: 'Erro interno do servidor',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
   })
 })
 
-app.listen(PORT, () => {
+// 🔥 USAR `server.listen` em vez de `app.listen`
+server.listen(PORT, () => {
   console.log(`
   🚀 Servidor rodando na porta ${PORT}
   📍 Ambiente: ${process.env.NODE_ENV || 'development'}
   🔗 URL: http://localhost:${PORT}
+  💬 WebSocket (chat) ativo
   `)
 })
 
-module.exports = app
+module.exports = { app, server, io }
