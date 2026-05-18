@@ -308,6 +308,53 @@ io.on('connection', socket => {
     }
   })
 
+  // Enviar mensagem automática do sistema (ex: lembrete, instruções)
+  socket.on('mensagem-sistema', async data => {
+    const { rodadaId, mensagem, acao } = data
+    if (!rodadaId || !mensagem) return
+
+    try {
+      const rodada = await Rodada.findById(rodadaId)
+      if (!rodada) {
+        socket.emit('erro', 'Rodada não encontrada')
+        return
+      }
+
+      // Verificar se o usuário é participante da rodada
+      const isParticipante = rodada.participantes.some(
+        p => p.usuario.toString() === socket.usuario.id
+      )
+      if (!isParticipante) {
+        socket.emit(
+          'erro',
+          'Você não tem permissão para enviar mensagens do sistema'
+        )
+        return
+      }
+
+      const novaMsg = new ChatMessage({
+        rodadaId,
+        mensagem: mensagem.trim(),
+        tipo: 'sistema',
+        acao: acao || null,
+        createdAt: new Date()
+      })
+      await novaMsg.save()
+
+      // Broadcast para todos na sala
+      io.to(`rodada-${rodadaId}`).emit('mensagem', {
+        _id: novaMsg._id,
+        mensagem: novaMsg.mensagem,
+        tipo: 'sistema',
+        acao: novaMsg.acao,
+        createdAt: novaMsg.createdAt
+      })
+    } catch (error) {
+      console.error('Erro ao enviar mensagem do sistema:', error)
+      socket.emit('erro', 'Erro ao enviar mensagem do sistema')
+    }
+  })
+
   socket.on('disconnect', () => {
     console.log(
       `🔴 Usuário desconectado: ${socket.usuario.nome} (${socket.id})`

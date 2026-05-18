@@ -1,43 +1,45 @@
-// models/ChatMessage.js
 const mongoose = require('mongoose')
 
 const chatMessageSchema = new mongoose.Schema({
   rodadaId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Rodada',
-    required: true,
-    index: true
+    required: true
   },
   usuarioId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true
+    ref: 'User'
   },
   nome: {
-    type: String,
-    required: true,
-    trim: true
+    type: String
   },
   mensagem: {
     type: String,
     required: true,
-    maxlength: 500,
-    trim: true
+    maxlength: 1000
   },
   tipo: {
     type: String,
-    enum: ['texto', 'sistema'],
-    default: 'texto'
+    enum: ['usuario', 'sistema'],
+    default: 'usuario'
+  },
+  acao: {
+    type: String,
+    enum: [
+      'pagamento_confirmado',
+      'rodada_iniciada',
+      'rodada_concluida',
+      'entrou_na_fila',
+      'saiu_da_rodada',
+      'lembrete_geral',
+      'instrucoes'
+    ],
+    default: null
   },
   createdAt: {
     type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   }
 })
-
-// Índice composto para consultas eficientes
-chatMessageSchema.index({ rodadaId: 1, createdAt: -1 })
 
 module.exports = mongoose.model('ChatMessage', chatMessageSchema)

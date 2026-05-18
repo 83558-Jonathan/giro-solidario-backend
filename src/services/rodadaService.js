@@ -2,6 +2,9 @@ const Rodada = require('../models/Rodada')
 const User = require('../models/User')
 const Transacao = require('../models/Transacao')
 
+const ChatMessage = require('../models/ChatMessage')
+const { io } = require('../../server')
+
 // No topo do arquivo, antes da classe RodadaService
 const pagamentosProcessadosService = new Map() // Cache para controle de pagamentos processados
 const processandoRodadas = new Map() // Cache para evitar processamento duplicado de rodadas
@@ -407,23 +410,22 @@ class RodadaService {
 
       console.log(`Iniciando rodada ${rodada.nome}...`)
 
-      // Embaralhar participantes para distribuicao aleatoria
+      // Embaralhar participantes
       const shuffled = [...rodada.participantes].sort(() => Math.random() - 0.5)
 
-      // Distribuir cores: 1 verde, 2 pretos, 4 azuis, 8 vermelhos
+      // Distribuir cores
       shuffled[0].cor = 'verde'
       shuffled[1].cor = 'preto'
       shuffled[2].cor = 'preto'
       for (let i = 3; i < 7; i++) shuffled[i].cor = 'azul'
       for (let i = 7; i < 15; i++) shuffled[i].cor = 'vermelho'
 
-      // Atualizar listas de cores
       rodada.verde = shuffled[0].usuario
       rodada.pretos = [shuffled[1].usuario, shuffled[2].usuario]
       rodada.azuis = shuffled.slice(3, 7).map(p => p.usuario)
       rodada.vermelhos = shuffled.slice(7, 15).map(p => p.usuario)
 
-      // Registrar historico
+      // Histórico
       shuffled.forEach(p => {
         rodada.historicoMovimentacoes.push({
           usuario: p.usuario,
@@ -446,10 +448,32 @@ class RodadaService {
       console.log(`   Azuis: 4`)
       console.log(`   Vermelhos: 8`)
 
-      // ===========================================
-      // CRIAR TRANSACOES PARA TODOS OS VERMELHOS
-      // ===========================================
+      // Criar transações para os vermelhos
       await this.criarTransacoesParaVermelhos(rodadaId)
+
+      // ===========================================
+      // MENSAGEM AUTOMÁTICA NO CHAT
+      // ===========================================
+      const ChatMessage = require('../models/ChatMessage')
+      const { io } = require('../server') // ajuste o caminho conforme sua estrutura
+
+      const mensagemInicio = new ChatMessage({
+        rodadaId: rodada._id,
+        mensagem: `🎲 A rodada foi iniciada! Os 8 VERMELHOS devem pagar R$150 para que a rodada avance. O VERDE receberá R$1000 quando todos pagarem.`,
+        tipo: 'sistema',
+        acao: 'rodada_iniciada',
+        createdAt: new Date()
+      })
+      await mensagemInicio.save()
+
+      io.to(`rodada-${rodada._id}`).emit('mensagem', {
+        _id: mensagemInicio._id,
+        mensagem: mensagemInicio.mensagem,
+        tipo: 'sistema',
+        acao: 'rodada_iniciada',
+        createdAt: mensagemInicio.createdAt
+      })
+      // ===========================================
 
       return rodada
     } catch (error) {
@@ -1106,11 +1130,9 @@ class RodadaService {
     return alocados
   }
 
-  // ===========================================
   // AVANCAR RODADA - PROMOVER CORES E GERAR NOVAS RODADAS
-  // ===========================================
   async avancarRodada (rodadaId) {
-    // PREVENIR PROCESSAMENTO DUPLICADO
+    // Prevenir processamento duplicado
     if (processandoRodadas.has(rodadaId)) {
       console.log(
         `[avancarRodada] Rodada ${rodadaId} ja esta sendo processada. Ignorando.`
@@ -1141,7 +1163,6 @@ class RodadaService {
         `[DEBUG] Rodada: ${rodada.nome}, Status atual: ${rodada.status}`
       )
 
-      // ✅ VERIFICAÇÃO: Se já está concluída, não faz nada
       if (rodada.status === 'concluida') {
         console.log(
           `[DEBUG] Rodada ${rodada.nome} ja esta concluida. Ignorando.`
@@ -1156,7 +1177,6 @@ class RodadaService {
         throw new Error('Rodada nao esta em andamento')
       }
 
-      // ✅ VERIFICAÇÃO CRÍTICA: Se já gerou rodadas, NÃO processa novamente
       if (rodada.rodadasGeradas && rodada.rodadasGeradas.length > 0) {
         console.log(
           `[DEBUG] Rodada ${rodada.nome} ja gerou ${rodada.rodadasGeradas.length} rodadas. Ignorando.`
@@ -1164,9 +1184,7 @@ class RodadaService {
         return rodada
       }
 
-      // ===========================================
-      // 1. VERIFICAR SE TODOS OS VERMELHOS PAGARAM
-      // ===========================================
+      // Verificar se todos os vermelhos pagaram
       const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho')
       const vermelhosPagos = vermelhos.filter(
         v => v.depositoConfirmado === true
@@ -1179,23 +1197,15 @@ class RodadaService {
         return rodada
       }
 
-      console.log(
-        `[DEBUG] Todos os 8 vermelhos pagaram! Prosseguindo com avanco...`
-      )
+      console.log(`[DEBUG] Todos os 8 vermelhos pagaram! Prosseguindo...`)
 
-      // ===========================================
-      // 2. SALVAR O VERDE ATUAL (vai ganhar premio)
-      // ===========================================
       const verdeAtual = rodada.participantes.find(p => p.cor === 'verde')
       console.log(
         `[DEBUG] Verde atual que ganhou R$ 1000: ${verdeAtual?.usuario}`
       )
 
-      // ===========================================
-      // 3. PROMOVER CORES (dentro da rodada)
-      // ===========================================
+      // Promover cores
       console.log(`[DEBUG] Promovendo cores...`)
-
       for (const p of rodada.participantes) {
         if (p.cor === 'vermelho') {
           p.cor = 'azul'
@@ -1209,14 +1219,9 @@ class RodadaService {
         } else if (p.cor === 'verde') {
           p.cor = 'concluido'
           console.log(`   verde->concluido ${p.usuario} (ganhou R$ 1000)`)
-
-          // Adicionar saldo ao usuário que ganhou o prêmio
           try {
             await User.findByIdAndUpdate(p.usuario, {
-              $inc: {
-                saldoPremio: 1000,
-                totalGanho: 1000
-              }
+              $inc: { saldoPremio: 1000, totalGanho: 1000 }
             })
             console.log(
               `   💰 Prêmio de R$ 1.000 creditado ao usuário ${p.usuario}`
@@ -1224,13 +1229,9 @@ class RodadaService {
           } catch (err) {
             console.error(`   ❌ Erro ao creditar prêmio: ${err.message}`)
           }
-          // =========================================
         }
       }
 
-      // ===========================================
-      // 4. SEPARAR PARTICIPANTES POR COR APOS PROMOCAO
-      // ===========================================
       const novosVerdes = rodada.participantes.filter(p => p.cor === 'verde')
       const novosPretos = rodada.participantes.filter(p => p.cor === 'preto')
       const novosAzuis = rodada.participantes.filter(p => p.cor === 'azul')
@@ -1239,7 +1240,6 @@ class RodadaService {
         `[DEBUG] Apos promocao: Verdes: ${novosVerdes.length}, Pretos: ${novosPretos.length}, Azuis: ${novosAzuis.length}`
       )
 
-      // Validar quantidade de verdes (devem ser 2)
       if (novosVerdes.length !== 2) {
         console.error(
           `[DEBUG] ERRO: Numero de verdes insuficiente: ${novosVerdes.length}. Esperado: 2`
@@ -1248,16 +1248,13 @@ class RodadaService {
         return rodada
       }
 
-      // ===========================================
-      // 5. CRIAR 2 NOVAS RODADAS (APENAS 2!)
-      // ===========================================
+      // Gerar 2 novas rodadas
       console.log(`[DEBUG] 2 verdes encontrados! Gerando 2 novas rodadas...`)
 
       const verdesIds = novosVerdes.map(v => v.usuario)
       const pretosIds = novosPretos.map(p => p.usuario)
       const azuisIds = novosAzuis.map(a => a.usuario)
 
-      // Dividir em dois grupos
       const grupo1Pretos = pretosIds.slice(0, 2)
       const grupo2Pretos = pretosIds.slice(2, 4)
       const grupo1Azuis = azuisIds.slice(0, 4)
@@ -1283,22 +1280,16 @@ class RodadaService {
         rodada._id
       )
 
-      // ✅ MARCAR QUE AS RODADAS FORAM GERADAS (evita duplicação)
       rodada.rodadasGeradas = [novaRodada1._id, novaRodada2._id]
       console.log(`[DEBUG] Rodadas geradas com sucesso!`)
 
-      // ===========================================
-      // 6. ALOCAR USUARIOS DA FILA DE ESPERA
-      // ===========================================
+      // Alocar fila de espera
       await this.alocarFilaEmTodasRodadas()
 
-      // ===========================================
-      // 7. FINALIZAR RODADA ORIGINAL COMO CONCLUÍDA
-      // ===========================================
+      // Finalizar rodada original
       console.log(
         `\n[FINALIZACAO] Finalizando rodada original como concluída...`
       )
-
       rodada.historicoMovimentacoes.push({
         usuario: verdeAtual.usuario,
         corAnterior: 'verde',
@@ -1316,6 +1307,30 @@ class RodadaService {
       console.log(`[FINALIZACAO] Rodada ${rodada.nome} concluída com sucesso!`)
       console.log(`   🏆 Verde vencedor ganhou R$ 1000`)
       console.log(`   Novas rodadas geradas: ${rodada.rodadasGeradas.length}`)
+
+      // ===========================================
+      // MENSAGEM AUTOMÁTICA DE CONCLUSÃO NO CHAT
+      // ===========================================
+      const ChatMessage = require('../models/ChatMessage')
+      const { io } = require('../server') // ajuste o caminho
+
+      const mensagemConclusao = new ChatMessage({
+        rodadaId: rodada._id,
+        mensagem: `🏆 PARABÉNS! A rodada foi concluída. O VERDE ganhou R$1000! Duas novas rodadas foram criadas.`,
+        tipo: 'sistema',
+        acao: 'rodada_concluida',
+        createdAt: new Date()
+      })
+      await mensagemConclusao.save()
+
+      io.to(`rodada-${rodada._id}`).emit('mensagem', {
+        _id: mensagemConclusao._id,
+        mensagem: mensagemConclusao.mensagem,
+        tipo: 'sistema',
+        acao: 'rodada_concluida',
+        createdAt: mensagemConclusao.createdAt
+      })
+      // ===========================================
 
       return rodada
     } catch (error) {
