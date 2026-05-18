@@ -1,49 +1,52 @@
 // models/SolicitacaoSaque.js
-const mongoose = require('mongoose');
+const mongoose = require('mongoose')
 
-const solicitacaoSaqueSchema = new mongoose.Schema({
+const solicitacaoSaqueSchema = new mongoose.Schema(
+  {
     usuario: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
     },
     rodada: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Rodada',
-        required: false   // <--- ALTERADO: agora não é obrigatório
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Rodada',
+      required: false
     },
     valor: {
-        type: Number,
-        required: true,
-        default: 1000
+      type: Number,
+      required: true,
+      default: 1000
     },
     chavePix: {
-        type: String,
-        required: true
+      type: String,
+      required: true
     },
     tipoChavePix: {
-        type: String,
-        enum: ['cpf', 'email', 'telefone', 'aleatoria'],
-        required: true
+      type: String,
+      enum: ['cpf', 'email', 'telefone', 'aleatoria'],
+      required: true
     },
     status: {
-        type: String,
-        enum: ['pendente', 'aprovado', 'recusado', 'pago'],
-        default: 'pendente'
+      type: String,
+      enum: ['pendente', 'aprovado', 'recusado', 'pago'],
+      default: 'pendente'
     },
     dataSolicitacao: {
-        type: Date,
-        default: Date.now
+      type: Date,
+      default: Date.now
     },
     dataAprovacao: Date,
     dataPagamento: Date,
     observacao: String,
     aprovadoPor: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
     }
-}, {
+  },
+  {
     timestamps: true
-});
+  }
+)
 
-module.exports = mongoose.model('SolicitacaoSaque', solicitacaoSaqueSchema);
+module.exports = mongoose.model('SolicitacaoSaque', solicitacaoSaqueSchema)

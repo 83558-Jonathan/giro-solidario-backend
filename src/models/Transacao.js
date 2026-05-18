@@ -1,67 +1,67 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose')
 
 const transacaoSchema = new mongoose.Schema(
   {
     tipo: {
       type: String,
-      enum: ["deposito", "recebimento", "estorno"],
-      default: "deposito",
+      enum: ['deposito', 'recebimento', 'estorno'],
+      default: 'deposito'
     },
     pagador: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      ref: 'User',
+      required: true
     },
     recebedor: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      ref: 'User',
+      required: true
     },
     valor: {
       type: Number,
       required: true,
-      default: 150,
+      default: 150
     },
     valorPago: {
       type: Number,
-      default: 150,
+      default: 150
     },
     rodada: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Rodada",
-      required: true,
+      ref: 'Rodada',
+      required: true
     },
     status: {
       type: String,
-      enum: ["pendente", "confirmado", "cancelado"],
-      default: "pendente",
+      enum: ['pendente', 'confirmado', 'cancelado', 'cancelada_expirada'],
+      default: 'pendente'
     },
     comprovante: String,
     cobrancaId: String,
     dataConfirmacao: Date,
     confirmadoPor: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: 'User'
     },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
-      default: {},
+      default: {}
     },
     motivoCancelamento: String,
     dataCancelamento: Date,
     createdAt: {
       type: Date,
-      default: Date.now,
-    },
+      default: Date.now
+    }
   },
   {
-    timestamps: true,
-  },
-);
+    timestamps: true
+  }
+)
 
 // Índices para otimização de consultas
-transacaoSchema.index({ pagador: 1, status: 1 });
-transacaoSchema.index({ cobrancaId: 1 });
-transacaoSchema.index({ rodada: 1, status: 1 });
+transacaoSchema.index({ pagador: 1, status: 1 })
+transacaoSchema.index({ cobrancaId: 1 })
+transacaoSchema.index({ rodada: 1, status: 1 })
 
-module.exports = mongoose.model("Transacao", transacaoSchema);
+module.exports = mongoose.model('Transacao', transacaoSchema)

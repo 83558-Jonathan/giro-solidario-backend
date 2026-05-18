@@ -220,7 +220,7 @@ exports.forcarAlocacaoFila = async (req, res) => {
 }
 
 // ===========================================
-// VER MANDALA - COM VERIFICAÇÃO AUTOMÁTICA
+// VER MANDALA - COM VERIFICAÇÃO AUTOMÁTICA E RECONSTRUÇÃO DE CORES
 // ===========================================
 exports.getMandala = async (req, res) => {
   try {
@@ -230,14 +230,11 @@ exports.getMandala = async (req, res) => {
       return res.status(400).json({ success: false, error: 'ID inválido' })
     }
 
-    // ===========================================
-    // VERIFICAR E AVANÇAR AUTOMATICAMENTE SE NECESSÁRIO
-    // Isso garante que quando todos pagarem, a rodada avance
-    // ===========================================
+    // Verificar e avançar automaticamente se necessário (todos pagaram)
     await RodadaService.verificarEAvancarSeNecessario(rodadaId)
 
     const db = mongoose.connection.db
-    const rodada = await db.collection('rodadas').findOne({
+    let rodada = await db.collection('rodadas').findOne({
       _id: new mongoose.Types.ObjectId(rodadaId)
     })
 
@@ -247,7 +244,31 @@ exports.getMandala = async (req, res) => {
         .json({ success: false, error: 'Rodada não encontrada' })
     }
 
-    // Buscar nomes dos usuários
+    // ===========================================
+    // RECONSTRUIR ARRAYS DE CORES A PARTIR DE PARTICIPANTES
+    // Isso garante que, mesmo se os arrays estiverem desatualizados,
+    // a resposta será consistente com os participantes reais.
+    // ===========================================
+    const participantes = rodada.participantes || []
+    const vermelhosReconstruidos = participantes
+      .filter(p => p.cor === 'vermelho')
+      .map(p => p.usuario)
+    const azuisReconstruidos = participantes
+      .filter(p => p.cor === 'azul')
+      .map(p => p.usuario)
+    const pretosReconstruidos = participantes
+      .filter(p => p.cor === 'preto')
+      .map(p => p.usuario)
+    const verdeReconstruido =
+      participantes.find(p => p.cor === 'verde')?.usuario || null
+
+    // Substituir os arrays antigos pelos novos (apenas para a resposta, não salva no banco)
+    rodada.vermelhos = vermelhosReconstruidos
+    rodada.azuis = azuisReconstruidos
+    rodada.pretos = pretosReconstruidos
+    rodada.verde = verdeReconstruido
+
+    // Buscar nomes dos usuários para enriquecer a resposta
     const users = db.collection('users')
     const participantesComNomes = []
 
@@ -263,10 +284,10 @@ exports.getMandala = async (req, res) => {
     const mandala = {
       ...rodada,
       participantes: participantesComNomes,
-      azuis: rodada.azuis || [],
-      pretos: rodada.pretos || [],
-      vermelhos: rodada.vermelhos || [],
-      verde: rodada.verde || null
+      azuis: rodada.azuis,
+      pretos: rodada.pretos,
+      vermelhos: rodada.vermelhos,
+      verde: rodada.verde
     }
 
     res.json({ success: true, data: mandala })

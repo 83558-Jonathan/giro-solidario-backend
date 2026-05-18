@@ -36,6 +36,18 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       return { success: false, message: 'Transação não encontrada' }
     }
 
+    // Impedir processamento se já expirou ou foi cancelada
+    if (
+      transacao.status === 'cancelada_expirada' ||
+      transacao.status === 'cancelado'
+    ) {
+      console.log(
+        `⚠️ [${source}] Transação ${transacaoId} está com status ${transacao.status}. Não processar pagamento.`
+      )
+      pagamentosProcessados.delete(transacaoId)
+      return { success: false, message: 'Transação expirada ou cancelada' }
+    }
+
     if (transacao.status === 'confirmado') {
       console.log(
         `⚠️ [${source}] Transação ${transacaoId} já estava confirmada. Ignorando.`
@@ -92,7 +104,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     rodada.totalDepositosConfirmados = vermelhosPagos.length
     await rodada.save()
 
-    // REMOVER DA FILA DE ESPERA (se estiver nela)
+    // Remover da fila de espera (se estiver nela)
     const usuario = await User.findById(transacao.pagador)
     if (usuario && usuario.aguardandoVermelho) {
       usuario.aguardandoVermelho = false
@@ -173,6 +185,12 @@ exports.criarCobrancaPix = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, error: 'Esta transação já foi paga' })
+    // Impedir criação se já expirou
+    if (transacao.status === 'cancelada_expirada')
+      return res.status(400).json({
+        success: false,
+        error: 'Transação expirada. Não é possível gerar novo PIX.'
+      })
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -198,8 +216,8 @@ exports.criarCobrancaPix = async (req, res) => {
       tipo: 'pix_qrcode_v1',
       renovacoes: 0,
       valorOriginal: VALOR_VERMELHO,
-      qrCode: brCode, // 🔥 NOVO: salva o código PIX (texto)
-      qrCodeImage: brCodeBase64 // 🔥 NOVO: salva a imagem base64
+      qrCode: brCode,
+      qrCodeImage: brCodeBase64
     }
     await transacao.save()
 
@@ -259,10 +277,15 @@ exports.verificarStatus = async (req, res) => {
         .json({ success: false, error: 'Transação não encontrada' })
 
     let expirado = false
+    // 1. Verificar expiração por data
     if (
       transacao.metadata?.expiraEm &&
       new Date() > new Date(transacao.metadata.expiraEm)
     ) {
+      expirado = true
+    }
+    // 2. Verificar status "cancelada_expirada"
+    if (transacao.status === 'cancelada_expirada') {
       expirado = true
     }
 
@@ -276,7 +299,8 @@ exports.verificarStatus = async (req, res) => {
       })
     }
 
-    if (transacao.cobrancaId) {
+    // Se ainda está pendente, consulta API externa (apenas se não estiver expirada)
+    if (transacao.cobrancaId && !expirado) {
       try {
         const response = await abacate.get(`/pixQrCode/check`, {
           params: { id: transacao.cobrancaId }
@@ -298,8 +322,10 @@ exports.verificarStatus = async (req, res) => {
 
     const transacaoAtualizada = await Transacao.findById(transacaoId)
     const finalExpirado =
-      transacaoAtualizada.metadata?.expiraEm &&
-      new Date() > new Date(transacaoAtualizada.metadata.expiraEm)
+      (transacaoAtualizada.metadata?.expiraEm &&
+        new Date() > new Date(transacaoAtualizada.metadata.expiraEm)) ||
+      transacaoAtualizada.status === 'cancelada_expirada'
+
     res.json({
       success: true,
       status: transacaoAtualizada.status,
@@ -332,10 +358,26 @@ exports.renovarCobrancaPix = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, error: 'Transação não encontrada' })
-    if (transacao.status === 'confirmado')
-      return res
-        .status(400)
-        .json({ success: false, error: 'Esta transação já foi paga' })
+
+    // ✅ BLOQUEAR RENOVAÇÃO SE NÃO ESTIVER PENDENTE
+    if (transacao.status !== 'pendente') {
+      return res.status(400).json({
+        success: false,
+        error: 'Não é possível renovar esta cobrança – status inválido'
+      })
+    }
+
+    // Verificar se o usuário ainda está na rodada (não foi removido por expiração)
+    const aindaNaRodada = await Rodada.findOne({
+      'participantes.usuario': transacao.pagador._id,
+      'participantes.transacaoId': transacaoId
+    })
+    if (!aindaNaRodada) {
+      return res.status(400).json({
+        success: false,
+        error: 'Você não está mais na rodada. Renovação não permitida.'
+      })
+    }
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -361,8 +403,8 @@ exports.renovarCobrancaPix = async (req, res) => {
       expiraEm: expiresAt,
       renovacoes,
       valorCorreto: VALOR_VERMELHO,
-      qrCode: brCode, // 🔥 NOVO: salva o código PIX (texto)
-      qrCodeImage: brCodeBase64, // 🔥 NOVO: salva a imagem base64
+      qrCode: brCode,
+      qrCodeImage: brCodeBase64,
       historicoRenovacoes: [
         ...(transacao.metadata?.historicoRenovacoes || []),
         {
@@ -399,63 +441,94 @@ exports.renovarCobrancaPix = async (req, res) => {
 // CANCELAR EXPIRADO (chamado pelo frontend)
 // ===========================================
 exports.cancelarExpirado = async (req, res) => {
-  const { transacaoId } = req.body
-  const usuarioId = req.usuario.id
+  const { transacaoId } = req.body;
+  const usuarioId = req.usuario.id;
 
   try {
-    const transacao = await Transacao.findById(transacaoId)
-    if (!transacao)
-      return res.status(404).json({ error: 'Transação não encontrada' })
-    if (transacao.status === 'confirmado')
-      return res.status(400).json({ error: 'Transação já foi paga' })
+    console.log(`[CANCELAR-EXPIRADO] Iniciando para transacao ${transacaoId}, usuario ${usuarioId}`);
 
-    const expiraEm = transacao.metadata?.expiraEm
-    if (expiraEm && new Date() < new Date(expiraEm)) {
-      return res.status(400).json({ error: 'QR Code ainda não expirou' })
+    const transacao = await Transacao.findById(transacaoId);
+    if (!transacao) {
+      return res.status(404).json({ error: 'Transação não encontrada' });
+    }
+    if (transacao.status === 'confirmado') {
+      return res.status(400).json({ error: 'Transação já foi paga' });
     }
 
+    // Buscar a rodada de forma mais direta
     const rodada = await Rodada.findOne({
+      'participantes.transacaoId': transacaoId,
       'participantes.usuario': usuarioId,
-      'participantes.cor': 'vermelho',
-      'participantes.transacaoId': transacaoId
-    })
-    if (!rodada)
-      return res
-        .status(404)
-        .json({ error: 'Rodada não encontrada para este usuário' })
+      'participantes.cor': 'vermelho'
+    });
 
-    rodada.participantes = rodada.participantes.filter(
-      p => p.transacaoId !== transacaoId
-    )
-    await rodada.save()
+    if (!rodada) {
+      console.log(`[CANCELAR-EXPIRADO] Rodada não encontrada para transacao ${transacaoId}`);
+      // Se a transação já está expirada e não tem rodada, consideramos já removido
+      if (transacao.status === 'cancelada_expirada') {
+        return res.json({ success: true, message: 'Participante já havia sido removido' });
+      }
+      return res.status(404).json({ error: 'Rodada não encontrada' });
+    }
 
-    transacao.status = 'cancelada_expirada'
-    await transacao.save()
+    console.log(`[CANCELAR-EXPIRADO] Rodada encontrada: ${rodada.nome} (${rodada._id})`);
 
-    const usuario = await User.findById(usuarioId)
-    if (!usuario.aguardandoVermelho) {
-      usuario.aguardandoVermelho = true
-      usuario.rodadaBloqueada = rodada._id
-      usuario.dataEntradaFila = new Date()
-      const ultimoNaFila = await User.findOne({
-        aguardandoVermelho: true
-      }).sort('-posicaoFila')
-      usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1
-      await usuario.save()
-      console.log(
-        `✅ Usuário ${usuario.nome} removido da rodada ${rodada.nome} e colocado na fila (posição ${usuario.posicaoFila})`
-      )
+    // REMOÇÃO FORÇADA usando operadores atômicos $pull
+    const usuarioIdStr = usuarioId.toString();
+
+    const updateResult = await Rodada.updateOne(
+      { _id: rodada._id },
+      {
+        $pull: {
+          participantes: { transacaoId: transacaoId },
+          vermelhos: usuarioId,
+          azuis: usuarioId,
+          pretos: usuarioId
+        },
+        $unset: { verde: usuarioId } // se for o verde, remove
+      }
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      console.log(`[CANCELAR-EXPIRADO] Nenhum documento alterado. Possivelmente já removido.`);
+    } else {
+      console.log(`[CANCELAR-EXPIRADO] Participante removido da rodada via $pull.`);
+    }
+
+    // Recalcular totalDepositosConfirmados (buscar rodada atualizada)
+    const rodadaAtualizada = await Rodada.findById(rodada._id);
+    const vermelhosRestantes = rodadaAtualizada.participantes.filter(p => p.cor === 'vermelho');
+    const vermelhosPagos = vermelhosRestantes.filter(v => v.depositoConfirmado === true);
+    rodadaAtualizada.totalDepositosConfirmados = vermelhosPagos.length;
+    await rodadaAtualizada.save();
+
+    // Atualizar status da transação
+    if (transacao.status !== 'cancelada_expirada') {
+      transacao.status = 'cancelada_expirada';
+      await transacao.save();
+    }
+
+    // Colocar na fila de espera
+    const usuario = await User.findById(usuarioId);
+    if (usuario && !usuario.aguardandoVermelho) {
+      usuario.aguardandoVermelho = true;
+      usuario.rodadaBloqueada = rodada._id;
+      usuario.dataEntradaFila = new Date();
+      const ultimoNaFila = await User.findOne({ aguardandoVermelho: true }).sort('-posicaoFila');
+      usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1;
+      await usuario.save();
+      console.log(`✅ Usuário ${usuario.nome} colocado na fila (posição ${usuario.posicaoFila})`);
     }
 
     res.json({
       success: true,
       message: 'Participante removido e colocado na fila de espera'
-    })
+    });
   } catch (error) {
-    console.error('Erro no cancelarExpirado:', error)
-    res.status(500).json({ error: 'Erro interno ao processar expiração' })
+    console.error('Erro no cancelarExpirado:', error);
+    res.status(500).json({ error: 'Erro interno ao processar expiração' });
   }
-}
+};
 
 // ===========================================
 // PROCESSAR TRANSAÇÕES EXPIRADAS (JOB)
@@ -470,6 +543,8 @@ async function processarTransacoesExpiradas () {
   for (const transacao of transacoesExpiradas) {
     try {
       const usuarioId = transacao.pagador._id
+      const usuarioIdStr = usuarioId.toString()
+
       const rodada = await Rodada.findOne({
         'participantes.usuario': usuarioId,
         'participantes.cor': 'vermelho',
@@ -477,9 +552,30 @@ async function processarTransacoesExpiradas () {
       })
       if (!rodada) continue
 
+      // ===========================================
+      // REMOÇÃO COMPLETA DO PARTICIPANTE
+      // ===========================================
       rodada.participantes = rodada.participantes.filter(
         p => p.transacaoId !== transacao._id
       )
+
+      rodada.vermelhos = rodada.vermelhos.filter(
+        id => id.toString() !== usuarioIdStr
+      )
+      rodada.azuis = rodada.azuis.filter(id => id.toString() !== usuarioIdStr)
+      rodada.pretos = rodada.pretos.filter(id => id.toString() !== usuarioIdStr)
+      if (rodada.verde && rodada.verde.toString() === usuarioIdStr) {
+        rodada.verde = null
+      }
+
+      const vermelhosRestantes = rodada.participantes.filter(
+        p => p.cor === 'vermelho'
+      )
+      const vermelhosPagos = vermelhosRestantes.filter(
+        v => v.depositoConfirmado === true
+      )
+      rodada.totalDepositosConfirmados = vermelhosPagos.length
+
       await rodada.save()
 
       transacao.status = 'cancelada_expirada'
@@ -497,7 +593,7 @@ async function processarTransacoesExpiradas () {
         await usuario.save()
       }
       console.log(
-        `[JOB] Transação ${transacao._id} expirada - usuário ${usuario.nome} removido`
+        `[JOB] Transação ${transacao._id} expirada - usuário ${usuario.nome} removido da rodada ${rodada.nome} e colocado na fila`
       )
     } catch (err) {
       console.error(`[JOB] Erro ao processar expiração ${transacao._id}:`, err)
