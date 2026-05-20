@@ -242,7 +242,7 @@ async function enviarEmailCobranca(
 }
 
 // ===========================================
-// 🔥 FUNÇÃO: Notificar verde sobre prêmio (exportada) - valor ajustado para R$ 1.000
+// FUNÇÃO: Notificar verde sobre prêmio (exportada) - valor ajustado para R$ 1.000
 // ===========================================
 exports.notificarPremioVerde = async (usuarioId, rodadaId, valor = 1000) => {
   try {

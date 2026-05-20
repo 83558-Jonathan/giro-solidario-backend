@@ -2,6 +2,8 @@ const RodadaService = require('../services/rodadaService')
 const User = require('../models/User')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const mongoose = require('mongoose')
+const Transacao = require('../models/Transacao')
+const Rodada = require('../models/Rodada')
 
 // CRIAR nova rodada
 exports.criarRodada = async (req, res) => {
@@ -220,82 +222,99 @@ exports.forcarAlocacaoFila = async (req, res) => {
 }
 
 // ===========================================
-// VER MANDALA - COM VERIFICAÇÃO AUTOMÁTICA E RECONSTRUÇÃO DE CORES
+// VER MANDALA - COM GARANTIA DE TRANSAÇÃO PARA VERMELHOS
 // ===========================================
 exports.getMandala = async (req, res) => {
   try {
-    const { rodadaId } = req.params
+    const { rodadaId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
+      return res.status(400).json({ success: false, error: 'ID inválido' });
     }
 
-    // Verificar e avançar automaticamente se necessário (todos pagaram)
-    await RodadaService.verificarEAvancarSeNecessario(rodadaId)
-
-    const db = mongoose.connection.db
-    let rodada = await db.collection('rodadas').findOne({
-      _id: new mongoose.Types.ObjectId(rodadaId)
-    })
-
+    // Usar o modelo Mongoose para poder salvar alterações
+    let rodada = await Rodada.findById(rodadaId);
     if (!rodada) {
-      return res
-        .status(404)
-        .json({ success: false, error: 'Rodada não encontrada' })
+      return res.status(404).json({ success: false, error: 'Rodada não encontrada' });
     }
 
     // ===========================================
-    // RECONSTRUIR ARRAYS DE CORES A PARTIR DE PARTICIPANTES
-    // Isso garante que, mesmo se os arrays estiverem desatualizados,
-    // a resposta será consistente com os participantes reais.
+    // GARANTIR QUE VERMELHOS TENHAM transacaoId
     // ===========================================
-    const participantes = rodada.participantes || []
-    const vermelhosReconstruidos = participantes
-      .filter(p => p.cor === 'vermelho')
-      .map(p => p.usuario)
-    const azuisReconstruidos = participantes
-      .filter(p => p.cor === 'azul')
-      .map(p => p.usuario)
-    const pretosReconstruidos = participantes
-      .filter(p => p.cor === 'preto')
-      .map(p => p.usuario)
-    const verdeReconstruido =
-      participantes.find(p => p.cor === 'verde')?.usuario || null
+    const podeTerTransacao =
+      rodada.status === 'em_andamento' ||
+      (rodada.status === 'aguardando' && rodada.verde);
 
-    // Substituir os arrays antigos pelos novos (apenas para a resposta, não salva no banco)
-    rodada.vermelhos = vermelhosReconstruidos
-    rodada.azuis = azuisReconstruidos
-    rodada.pretos = pretosReconstruidos
-    rodada.verde = verdeReconstruido
+    if (podeTerTransacao && rodada.verde) {
+      let modificado = false;
+      for (const participante of rodada.participantes) {
+        if (participante.cor === 'vermelho' && !participante.transacaoId) {
+          let transacao = await Transacao.findOne({
+            pagador: participante.usuario,
+            rodada: rodada._id,
+            status: 'pendente'
+          });
+          if (!transacao) {
+            transacao = new Transacao({
+              tipo: 'deposito',
+              pagador: participante.usuario,
+              recebedor: rodada.verde,
+              valor: 150,
+              rodada: rodada._id,
+              status: 'pendente'
+            });
+            await transacao.save();
+            console.log(`[getMandala] ✅ Transação criada para vermelho ${participante.usuario}`);
+          } else {
+            console.log(`[getMandala] ♻️ Transação existente reaproveitada: ${transacao._id}`);
+          }
+          participante.transacaoId = transacao._id;
+          modificado = true;
+        }
+      }
+      if (modificado) {
+        rodada.vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho').map(p => p.usuario);
+        await rodada.save();
+        console.log(`[getMandala] 🔄 Rodada ${rodada.nome} atualizada com transações para vermelhos`);
+      }
+    }
 
-    // Buscar nomes dos usuários para enriquecer a resposta
-    const users = db.collection('users')
-    const participantesComNomes = []
+    // ===========================================
+    // RECONSTRUIR ARRAYS DE CORES (consistência)
+    // ===========================================
+    const participantes = rodada.participantes || [];
+    rodada.vermelhos = participantes.filter(p => p.cor === 'vermelho').map(p => p.usuario);
+    rodada.azuis    = participantes.filter(p => p.cor === 'azul').map(p => p.usuario);
+    rodada.pretos   = participantes.filter(p => p.cor === 'preto').map(p => p.usuario);
+    rodada.verde    = participantes.find(p => p.cor === 'verde')?.usuario || null;
 
-    for (const p of rodada.participantes || []) {
-      const user = await users.findOne({ _id: p.usuario })
+    // Buscar nomes dos usuários (usando o modelo User)
+    const UserModel = require('../models/User');
+    const participantesComNomes = [];
+    for (const p of rodada.participantes) {
+      const user = await UserModel.findById(p.usuario).select('nome email');
       participantesComNomes.push({
-        ...p,
+        ...p.toObject(),
         nome: user?.nome || 'Desconhecido',
         email: user?.email || ''
-      })
+      });
     }
 
     const mandala = {
-      ...rodada,
+      ...rodada.toObject(),
       participantes: participantesComNomes,
       azuis: rodada.azuis,
       pretos: rodada.pretos,
       vermelhos: rodada.vermelhos,
       verde: rodada.verde
-    }
+    };
 
-    res.json({ success: true, data: mandala })
+    res.json({ success: true, data: mandala });
   } catch (error) {
-    console.error('Erro ao carregar mandala:', error)
-    res.status(500).json({ success: false, error: error.message })
+    console.error('❌ Erro ao carregar mandala:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
-}
+};
 
 // VERIFICAR STATUS do usuário
 exports.verificarStatusUsuario = async (req, res) => {
@@ -431,7 +450,7 @@ exports.sacarPremio = async (req, res) => {
     console.log(`   Chave PIX: ${usuario.chavePix}`)
     console.log(`   Saldo prêmio atual: R$ ${usuario.saldoPremio || 0}`)
 
-    // 🔥 VALOR DO SAQUE = SALDO ATUAL DO USUÁRIO (já descontado os R$150 da reentrada)
+    // VALOR DO SAQUE = SALDO ATUAL DO USUÁRIO (já descontado os R$150 da reentrada)
     const valorSaque = usuario.saldoPremio
     if (valorSaque <= 0) {
       return res.status(400).json({

@@ -13,7 +13,6 @@ const app = express()
 const server = http.createServer(app)
 const PORT = process.env.PORT || 5001
 const criarAdmin = require('./src/scripts/seedAdmin')
-const RodadaService = require('./src/services/rodadaService')
 const ChatMessage = require('./src/models/ChatMessage')
 const Rodada = require('./src/models/Rodada')
 const jwt = require('jsonwebtoken')
@@ -23,6 +22,7 @@ const jwt = require('jsonwebtoken')
 // ===========================================
 setInterval(async () => {
   try {
+    const RodadaService = require('./src/services/rodadaService')
     console.log(`\n[CRON] Verificando e alocando fila de espera...`)
     await RodadaService.alocarFilaEmTodasRodadas()
   } catch (error) {
@@ -31,9 +31,73 @@ setInterval(async () => {
 }, 30000)
 
 // ===========================================
+// JOB PERIÓDICO: VERIFICAR TRANSAÇÕES PENDENTES (fallback para webhook)
+// ===========================================
+setInterval(async () => {
+  try {
+    const Transacao = require('./src/models/Transacao')
+    const abacate = require('./src/config/abacate')
+    const {
+      processarPagamentoComControle
+    } = require('./src/controllers/pixController')
+
+    // Buscar transações pendentes que já geraram QR Code
+    const transacoesPendentes = await Transacao.find({
+      status: 'pendente',
+      cobrancaId: { $exists: true, $ne: null },
+      // Evitar verificar transações criadas há menos de 10 segundos (evitar sobrecarga)
+      createdAt: { $lt: new Date(Date.now() - 10000) }
+    }).limit(50) // limite para não sobrecarregar a API do AbacatePay
+
+    if (transacoesPendentes.length === 0) return
+
+    console.log(
+      `[JOB-PIX] Verificando ${transacoesPendentes.length} transações pendentes...`
+    )
+
+    for (const transacao of transacoesPendentes) {
+      try {
+        const response = await abacate.get(`/pixQrCode/check`, {
+          params: { id: transacao.cobrancaId }
+        })
+        const statusApi =
+          response.data.data?.status?.toUpperCase?.() ||
+          response.data.data?.status
+
+        if (
+          statusApi === 'PAID' ||
+          statusApi === 'COMPLETED' ||
+          statusApi === 'CONFIRMED'
+        ) {
+          console.log(
+            `[JOB-PIX] ✅ Pagamento confirmado para transação ${transacao._id}`
+          )
+          await processarPagamentoComControle(
+            transacao._id.toString(),
+            'job-periodico'
+          )
+        } else if (statusApi === 'EXPIRED') {
+          console.log(
+            `[JOB-PIX] ⏰ Transação ${transacao._id} expirada (será tratada pelo job de expiração)`
+          )
+          // O job de expiração já irá tratá-la (expiraPix.js)
+        }
+      } catch (err) {
+        console.error(
+          `[JOB-PIX] Erro ao verificar transação ${transacao._id}:`,
+          err.message
+        )
+      }
+    }
+  } catch (error) {
+    console.error('[JOB-PIX] Erro no job de verificação periódica:', error)
+  }
+}, 30000) // a cada 30 segundos
+
+// ===========================================
 // TRUST PROXY (IP real via Cloudflare)
 // ===========================================
-app.set('trust proxy', true)
+app.set('trust proxy', 'loopback')
 
 const getRealIp = req => {
   const forwarded = req.headers['x-forwarded-for']
@@ -79,7 +143,6 @@ app.use((req, res, next) => {
 const globalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 500,
-  keyGenerator: getRealIp,
   message: {
     success: false,
     error: 'Muitas requisições. Tente novamente mais tarde.'
@@ -87,44 +150,45 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 })
+
 const loginLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 100,
-  keyGenerator: getRealIp,
   skipSuccessfulRequests: true,
   message: {
     success: false,
     error: 'Muitas tentativas de login. Tente novamente em 5 minutos.'
   }
 })
+
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 100,
-  keyGenerator: getRealIp,
   message: {
     success: false,
     error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
   }
 })
+
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 50,
-  keyGenerator: getRealIp,
   message: {
     success: false,
     error: 'Muitas solicitações. Tente novamente em 1 hora.'
   }
 })
+
 const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 200,
-  keyGenerator: getRealIp,
   skip: req => {
     const trustedIps = process.env.TRUSTED_IPS
       ? process.env.TRUSTED_IPS.split(',')
       : []
     return trustedIps.includes(getRealIp(req))
   }
+  // keyGenerator é opcional, a biblioteca usa req.ip automaticamente
 })
 
 // ===========================================
@@ -185,8 +249,13 @@ mongoose
 
     // Alocação inicial da fila
     setTimeout(async () => {
-      console.log(`\n[STARTUP] Executando alocação inicial da fila...`)
-      await RodadaService.alocarFilaEmTodasRodadas()
+      try {
+        const RodadaService = require('./src/services/rodadaService')
+        console.log(`\n[STARTUP] Executando alocação inicial da fila...`)
+        await RodadaService.alocarFilaEmTodasRodadas()
+      } catch (err) {
+        console.error('[STARTUP] Erro ao alocar fila:', err.message)
+      }
     }, 5000)
   })
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
@@ -201,6 +270,14 @@ const io = socketIo(server, {
     credentials: true
   }
 })
+
+// INICIALIZA O io NO CONTROLLER PIX (para mensagens automáticas)
+const pixController = require('./src/controllers/pixController')
+pixController.initializeIo(io)
+
+// INICIALIZA O io NO RODADA SERVICE (para mensagens automáticas)
+const RodadaService = require('./src/services/rodadaService')
+RodadaService.initializeIo(io)
 
 // Middleware de autenticação para socket
 io.use(async (socket, next) => {
@@ -245,8 +322,6 @@ io.on('connection', socket => {
       console.log(
         `📌 ${socket.usuario.nome} entrou na sala da rodada ${rodadaId}`
       )
-      // OBS: histórico carregado via REST (GET /api/chat/historico/:rodadaId)
-      // Não emitimos 'historico' via socket para evitar tráfego desnecessário
     } catch (error) {
       console.error('Erro ao entrar na sala:', error)
       socket.emit('erro', 'Erro ao carregar o chat')
@@ -293,7 +368,6 @@ io.on('connection', socket => {
       })
       await novaMsg.save()
 
-      // Broadcast para todos na sala (inclui o remetente)
       io.to(`rodada-${rodadaId}`).emit('mensagem', {
         _id: novaMsg._id,
         usuarioId: socket.usuario.id,
@@ -308,7 +382,6 @@ io.on('connection', socket => {
     }
   })
 
-  // Enviar mensagem automática do sistema (ex: lembrete, instruções)
   socket.on('mensagem-sistema', async data => {
     const { rodadaId, mensagem, acao } = data
     if (!rodadaId || !mensagem) return
@@ -320,7 +393,6 @@ io.on('connection', socket => {
         return
       }
 
-      // Verificar se o usuário é participante da rodada
       const isParticipante = rodada.participantes.some(
         p => p.usuario.toString() === socket.usuario.id
       )
@@ -341,7 +413,6 @@ io.on('connection', socket => {
       })
       await novaMsg.save()
 
-      // Broadcast para todos na sala
       io.to(`rodada-${rodadaId}`).emit('mensagem', {
         _id: novaMsg._id,
         mensagem: novaMsg.mensagem,

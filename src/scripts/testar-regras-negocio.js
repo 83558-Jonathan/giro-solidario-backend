@@ -1174,7 +1174,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
   )
   const { usuario: verde5 } = await criarVerdeGanhador(1000)
 
-  // 🔥 LIMPAR A FILA: remover todos os outros usuários da fila
+  // LIMPAR A FILA: remover todos os outros usuários da fila
   await User.updateMany(
     { aguardandoVermelho: true },
     {
@@ -1192,7 +1192,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
   verde5.dataEntradaFila = new Date()
   await verde5.save()
 
-  // 🔥 FINALIZAR RODADAS ANTIGAS QUE ESTÃO AGUARDANDO SEM ESTRUTURA (para não interferir)
+  // FINALIZAR RODADAS ANTIGAS QUE ESTÃO AGUARDANDO SEM ESTRUTURA (para não interferir)
   await Rodada.updateMany(
     {
       status: 'aguardando',

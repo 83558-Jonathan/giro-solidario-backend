@@ -4,7 +4,20 @@ const Rodada = require('../models/Rodada')
 const User = require('../models/User')
 const RodadaService = require('../services/rodadaService')
 const ChatMessage = require('../models/ChatMessage')
-const { io } = require('../../server')
+
+// ===========================================
+// VARIÁVEL GLOBAL PARA O SOCKET.IO (inicializada pelo server.js)
+// ===========================================
+let io = null
+
+/**
+ * Função chamada pelo server.js após a criação do io
+ * @param {Object} socketIo - Instância do socket.io
+ */
+function initializeIo (socketIo) {
+  io = socketIo
+  console.log('✅ io inicializado no pixController')
+}
 
 const VALOR_VERMELHO = 150
 const pagamentosProcessados = new Map()
@@ -100,37 +113,49 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     participante.depositoConfirmado = true
     participante.dataDeposito = new Date()
 
-    // Calcular quantos pagamentos faltam após este
+    // Obter o nome do usuário que pagou
+    const usuarioPagador = await User.findById(transacao.pagador)
+    const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguém'
+
     const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho')
     const pagos = vermelhos.filter(v => v.depositoConfirmado === true)
     const faltam = vermelhos.length - pagos.length
 
-    // 🔥 OBTER O NOME DO USUÁRIO QUE PAGOU
-    const usuarioPagador = await User.findById(transacao.pagador)
-    const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguém'
+    // NOVO: emitir evento de pagamento confirmado para todos na sala
+    if (io) {
+      io.to(`rodada-${rodada._id}`).emit('pagamento-confirmado', {
+        transacaoId: transacao._id,
+        participanteId: transacao.pagador,
+        faltam: faltam,
+        totalVermelhos: vermelhos.length,
+        pagos: pagos.length
+      })
+    }
 
-    // Enviar mensagem automática no chat da rodada
-    const mensagemPagamento = new ChatMessage({
-      rodadaId: rodada._id,
-      mensagem: `✅ ${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avançar.`,
-      tipo: 'sistema',
-      acao: 'pagamento_confirmado',
-      createdAt: new Date()
-    })
-    await mensagemPagamento.save()
+    // Enviar mensagem automática no chat (se io estiver disponível)
+    if (io) {
+      const mensagemPagamento = new ChatMessage({
+        rodadaId: rodada._id,
+        mensagem: `✅ ${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avançar.`,
+        tipo: 'sistema',
+        acao: 'pagamento_confirmado',
+        createdAt: new Date()
+      })
+      await mensagemPagamento.save()
 
-    io.to(`rodada-${rodada._id}`).emit('mensagem', {
-      _id: mensagemPagamento._id,
-      mensagem: mensagemPagamento.mensagem,
-      tipo: 'sistema',
-      acao: 'pagamento_confirmado',
-      createdAt: mensagemPagamento.createdAt
-    })
+      io.to(`rodada-${rodada._id}`).emit('mensagem', {
+        _id: mensagemPagamento._id,
+        mensagem: mensagemPagamento.mensagem,
+        tipo: 'sistema',
+        acao: 'pagamento_confirmado',
+        createdAt: mensagemPagamento.createdAt
+      })
+    }
 
     rodada.totalDepositosConfirmados = pagos.length
     await rodada.save()
 
-    // Remover da fila de espera (se estiver nela)
+    // Remover da fila de espera
     const usuario = await User.findById(transacao.pagador)
     if (usuario && usuario.aguardandoVermelho) {
       usuario.aguardandoVermelho = false
@@ -157,6 +182,15 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       }
       try {
         await RodadaService.avancarRodada(rodada._id)
+
+        // NOVO: após avançar a rodada, notificar todos na sala
+        if (io) {
+          io.to(`rodada-${rodada._id}`).emit('rodada-atualizada', {
+            rodadaId: rodada._id,
+            status: 'concluida'
+          })
+        }
+
         console.log(
           `✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`
         )
@@ -244,7 +278,6 @@ exports.criarCobrancaPix = async (req, res) => {
     }
     await transacao.save()
 
-    // Envio de email (opcional)
     try {
       const emailController = require('./emailController')
       const usuario = await User.findById(transacao.pagador)
@@ -621,11 +654,15 @@ async function processarTransacoesExpiradas () {
   }
 }
 
+// ===========================================
+// EXPORTAÇÕES
+// ===========================================
 module.exports = {
   criarCobrancaPix: exports.criarCobrancaPix,
   verificarStatus: exports.verificarStatus,
   renovarCobrancaPix: exports.renovarCobrancaPix,
   processarPagamentoComControle,
   cancelarExpirado: exports.cancelarExpirado,
-  processarTransacoesExpiradas
+  processarTransacoesExpiradas,
+  initializeIo // função para inicializar o io
 }
