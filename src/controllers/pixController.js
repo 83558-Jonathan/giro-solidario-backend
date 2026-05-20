@@ -667,7 +667,7 @@ async function processarTransacoesExpiradas () {
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
-  const limiteHoras = 24 // Considerar vermelhos que não pagaram há mais de 24 horas
+  const limiteHoras = 0.01 // PARA TESTE: 36 horas -> 0.01 horas (36 segundos)
   const dataLimite = new Date(agora.getTime() - limiteHoras * 60 * 60 * 1000)
 
   console.log(

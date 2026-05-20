@@ -31,7 +31,7 @@ cron.schedule('* * * * *', () => {
 })
 
 // Executa diariamente à meia-noite (00:00)
-cron.schedule('0 0 * * *', () => {
+cron.schedule('* * * * *', () => {
   console.log(
     '⏰ [CRON-DIARIO] Executando limpeza de vermelhos inadimplentes...'
   )
