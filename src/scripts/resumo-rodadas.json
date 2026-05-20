@@ -1,6 +1,6 @@
 [
   {
-    "rodadaId": "6a0cfc7010d7b0db2c9ff9bd",
+    "rodadaId": "6a0e3305948c8919052811f8",
     "nome": "Rodada #1",
     "numero": 1,
     "status": "concluida",
@@ -15,118 +15,118 @@
     },
     "pagamentos": "0/0",
     "premioVerdePago": false,
-    "verdeVencedor": "Administrador Master",
-    "dataFim": "2026-05-20T00:12:33.220Z",
+    "verdeVencedor": "Participante_13",
+    "dataFim": "2026-05-20T22:17:43.013Z",
     "participantes": [
       {
-        "nome": "Administrador Master",
-        "email": "admin@giropremiados.com.br",
+        "nome": "Participante_13",
+        "email": "part_13_1779315462637@teste.com",
         "cor": "concluido",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.092Z"
-      },
-      {
-        "nome": "Participante_15",
-        "email": "part_15_1779235953024@teste.com",
-        "cor": "verde",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.079Z"
-      },
-      {
-        "nome": "Participante_7",
-        "email": "part_7_1779235952502@teste.com",
-        "cor": "verde",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.561Z"
-      },
-      {
-        "nome": "Participante_2",
-        "email": "part_2_1779235952099@teste.com",
-        "cor": "preto",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.170Z"
-      },
-      {
-        "nome": "Participante_3",
-        "email": "part_3_1779235952195@teste.com",
-        "cor": "preto",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.255Z"
-      },
-      {
-        "nome": "Participante_4",
-        "email": "part_4_1779235952266@teste.com",
-        "cor": "preto",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.329Z"
-      },
-      {
-        "nome": "Participante_12",
-        "email": "part_12_1779235952848@teste.com",
-        "cor": "preto",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:32.902Z"
-      },
-      {
-        "nome": "Participante_6",
-        "email": "part_6_1779235952439@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.497Z"
-      },
-      {
-        "nome": "Participante_9",
-        "email": "part_9_1779235952637@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.697Z"
-      },
-      {
-        "nome": "Participante_10",
-        "email": "part_10_1779235952704@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.766Z"
-      },
-      {
-        "nome": "Participante_5",
-        "email": "part_5_1779235952350@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.429Z"
-      },
-      {
-        "nome": "Participante_11",
-        "email": "part_11_1779235952775@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.842Z"
-      },
-      {
-        "nome": "Participante_8",
-        "email": "part_8_1779235952566@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.628Z"
-      },
-      {
-        "nome": "Participante_13",
-        "email": "part_13_1779235952905@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:32.961Z"
+        "dataEntrada": "2026-05-20T22:17:42.708Z"
       },
       {
         "nome": "Participante_14",
-        "email": "part_14_1779235952966@teste.com",
+        "email": "part_14_1779315462718@teste.com",
+        "cor": "verde",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:42.784Z"
+      },
+      {
+        "nome": "Participante_8",
+        "email": "part_8_1779315462228@teste.com",
+        "cor": "verde",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:42.292Z"
+      },
+      {
+        "nome": "Administrador Master",
+        "email": "admin@giropremiados.com.br",
+        "cor": "preto",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:41.700Z"
+      },
+      {
+        "nome": "Participante_9",
+        "email": "part_9_1779315462300@teste.com",
+        "cor": "preto",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:42.379Z"
+      },
+      {
+        "nome": "Participante_6",
+        "email": "part_6_1779315462063@teste.com",
+        "cor": "preto",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:42.149Z"
+      },
+      {
+        "nome": "Participante_2",
+        "email": "part_2_1779315461712@teste.com",
+        "cor": "preto",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:41.781Z"
+      },
+      {
+        "nome": "Participante_12",
+        "email": "part_12_1779315462568@teste.com",
         "cor": "azul",
         "depositoConfirmado": true,
-        "dataEntrada": "2026-05-20T00:12:33.020Z"
+        "dataEntrada": "2026-05-20T22:17:42.629Z"
+      },
+      {
+        "nome": "Participante_3",
+        "email": "part_3_1779315461804@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:41.877Z"
+      },
+      {
+        "nome": "Participante_4",
+        "email": "part_4_1779315461895@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:41.962Z"
+      },
+      {
+        "nome": "Participante_5",
+        "email": "part_5_1779315461972@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:42.049Z"
+      },
+      {
+        "nome": "Participante_7",
+        "email": "part_7_1779315462160@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:42.222Z"
+      },
+      {
+        "nome": "Participante_11",
+        "email": "part_11_1779315462501@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:42.563Z"
+      },
+      {
+        "nome": "Participante_15",
+        "email": "part_15_1779315462789@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:42.846Z"
+      },
+      {
+        "nome": "Participante_10",
+        "email": "part_10_1779315462423@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": true,
+        "dataEntrada": "2026-05-20T22:17:42.493Z"
       }
     ]
   },
   {
-    "rodadaId": "6a0cfc7110d7b0db2c9ffc73",
+    "rodadaId": "6a0e3306948c8919052814b0",
     "nome": "Rodada #2",
     "numero": 2,
     "status": "em_andamento",
@@ -141,117 +141,117 @@
     },
     "pagamentos": "0/8",
     "premioVerdePago": false,
-    "verdeVencedor": "Participante_15",
+    "verdeVencedor": "Participante_14",
     "participantes": [
       {
-        "nome": "Participante_15",
-        "email": "part_15_1779235953024@teste.com",
+        "nome": "Participante_14",
+        "email": "part_14_1779315462718@teste.com",
         "cor": "verde",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.210Z"
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
       },
       {
-        "nome": "Participante_2",
-        "email": "part_2_1779235952099@teste.com",
+        "nome": "Administrador Master",
+        "email": "admin@giropremiados.com.br",
         "cor": "preto",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.210Z"
-      },
-      {
-        "nome": "Participante_3",
-        "email": "part_3_1779235952195@teste.com",
-        "cor": "preto",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.210Z"
-      },
-      {
-        "nome": "Participante_6",
-        "email": "part_6_1779235952439@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.211Z"
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
       },
       {
         "nome": "Participante_9",
-        "email": "part_9_1779235952637@teste.com",
-        "cor": "azul",
+        "email": "part_9_1779315462300@teste.com",
+        "cor": "preto",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.211Z"
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
       },
       {
-        "nome": "Participante_10",
-        "email": "part_10_1779235952704@teste.com",
+        "nome": "Participante_12",
+        "email": "part_12_1779315462568@teste.com",
         "cor": "azul",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.211Z"
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
+      },
+      {
+        "nome": "Participante_3",
+        "email": "part_3_1779315461804@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
+      },
+      {
+        "nome": "Participante_4",
+        "email": "part_4_1779315461895@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
       },
       {
         "nome": "Participante_5",
-        "email": "part_5_1779235952350@teste.com",
+        "email": "part_5_1779315461972@teste.com",
         "cor": "azul",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.211Z"
+        "dataEntrada": "2026-05-20T22:17:43.000Z"
       },
       {
         "nome": "FilaUser_1",
-        "email": "filauser_1_1779235953227@teste.com",
+        "email": "filauser_1_1779315463022@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.286Z"
+        "dataEntrada": "2026-05-20T22:17:44.150Z"
       },
       {
         "nome": "FilaUser_2",
-        "email": "filauser_2_1779235953282@teste.com",
+        "email": "filauser_2_1779315463079@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.305Z"
+        "dataEntrada": "2026-05-20T22:17:47.399Z"
       },
       {
         "nome": "FilaUser_3",
-        "email": "filauser_3_1779235953334@teste.com",
+        "email": "filauser_3_1779315463134@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.324Z"
+        "dataEntrada": "2026-05-20T22:17:50.924Z"
       },
       {
         "nome": "FilaUser_4",
-        "email": "filauser_4_1779235953386@teste.com",
+        "email": "filauser_4_1779315463189@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.337Z"
+        "dataEntrada": "2026-05-20T22:17:54.614Z"
       },
       {
         "nome": "FilaUser_5",
-        "email": "filauser_5_1779235953437@teste.com",
+        "email": "filauser_5_1779315463243@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.359Z"
+        "dataEntrada": "2026-05-20T22:17:57.760Z"
       },
       {
         "nome": "FilaUser_6",
-        "email": "filauser_6_1779235953491@teste.com",
+        "email": "filauser_6_1779315463301@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.377Z"
+        "dataEntrada": "2026-05-20T22:18:00.824Z"
       },
       {
         "nome": "FilaUser_7",
-        "email": "filauser_7_1779235953543@teste.com",
+        "email": "filauser_7_1779315463358@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.388Z"
+        "dataEntrada": "2026-05-20T22:18:04.065Z"
       },
       {
         "nome": "FilaUser_8",
-        "email": "filauser_8_1779235953594@teste.com",
+        "email": "filauser_8_1779315463414@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.419Z"
+        "dataEntrada": "2026-05-20T22:18:07.209Z"
       }
     ]
   },
   {
-    "rodadaId": "6a0cfc7110d7b0db2c9ffc7c",
+    "rodadaId": "6a0e3307948c8919052814b9",
     "nome": "Rodada #3",
     "numero": 3,
     "status": "em_andamento",
@@ -266,112 +266,112 @@
     },
     "pagamentos": "0/8",
     "premioVerdePago": false,
-    "verdeVencedor": "Participante_7",
+    "verdeVencedor": "Participante_8",
     "participantes": [
       {
-        "nome": "Participante_7",
-        "email": "part_7_1779235952502@teste.com",
+        "nome": "Participante_8",
+        "email": "part_8_1779315462228@teste.com",
         "cor": "verde",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.213Z"
+        "dataEntrada": "2026-05-20T22:17:43.004Z"
       },
       {
-        "nome": "Participante_4",
-        "email": "part_4_1779235952266@teste.com",
+        "nome": "Participante_6",
+        "email": "part_6_1779315462063@teste.com",
         "cor": "preto",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
+        "dataEntrada": "2026-05-20T22:17:43.004Z"
       },
       {
-        "nome": "Participante_12",
-        "email": "part_12_1779235952848@teste.com",
+        "nome": "Participante_2",
+        "email": "part_2_1779315461712@teste.com",
         "cor": "preto",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
+        "dataEntrada": "2026-05-20T22:17:43.005Z"
+      },
+      {
+        "nome": "Participante_7",
+        "email": "part_7_1779315462160@teste.com",
+        "cor": "azul",
+        "depositoConfirmado": false,
+        "dataEntrada": "2026-05-20T22:17:43.005Z"
       },
       {
         "nome": "Participante_11",
-        "email": "part_11_1779235952775@teste.com",
+        "email": "part_11_1779315462501@teste.com",
         "cor": "azul",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
+        "dataEntrada": "2026-05-20T22:17:43.005Z"
       },
       {
-        "nome": "Participante_8",
-        "email": "part_8_1779235952566@teste.com",
+        "nome": "Participante_15",
+        "email": "part_15_1779315462789@teste.com",
         "cor": "azul",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
+        "dataEntrada": "2026-05-20T22:17:43.005Z"
       },
       {
-        "nome": "Participante_13",
-        "email": "part_13_1779235952905@teste.com",
+        "nome": "Participante_10",
+        "email": "part_10_1779315462423@teste.com",
         "cor": "azul",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
-      },
-      {
-        "nome": "Participante_14",
-        "email": "part_14_1779235952966@teste.com",
-        "cor": "azul",
-        "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:33.214Z"
+        "dataEntrada": "2026-05-20T22:17:43.005Z"
       },
       {
         "nome": "FilaUser_9",
-        "email": "filauser_9_1779235953647@teste.com",
+        "email": "filauser_9_1779315463470@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.482Z"
+        "dataEntrada": "2026-05-20T22:18:10.366Z"
       },
       {
         "nome": "FilaUser_10",
-        "email": "filauser_10_1779235953698@teste.com",
+        "email": "filauser_10_1779315463527@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.497Z"
+        "dataEntrada": "2026-05-20T22:18:13.489Z"
       },
       {
         "nome": "FilaUser_11",
-        "email": "filauser_11_1779235953752@teste.com",
+        "email": "filauser_11_1779315463580@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.515Z"
+        "dataEntrada": "2026-05-20T22:18:21.405Z"
       },
       {
         "nome": "FilaUser_12",
-        "email": "filauser_12_1779235953804@teste.com",
+        "email": "filauser_12_1779315463638@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.531Z"
+        "dataEntrada": "2026-05-20T22:18:24.768Z"
       },
       {
         "nome": "FilaUser_13",
-        "email": "filauser_13_1779235953856@teste.com",
+        "email": "filauser_13_1779315463694@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.549Z"
+        "dataEntrada": "2026-05-20T22:18:28.043Z"
       },
       {
         "nome": "FilaUser_14",
-        "email": "filauser_14_1779235953906@teste.com",
+        "email": "filauser_14_1779315463749@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.564Z"
+        "dataEntrada": "2026-05-20T22:18:31.219Z"
       },
       {
         "nome": "FilaUser_15",
-        "email": "filauser_15_1779235953957@teste.com",
+        "email": "filauser_15_1779315463805@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.589Z"
+        "dataEntrada": "2026-05-20T22:18:35.872Z"
       },
       {
         "nome": "FilaUser_16",
-        "email": "filauser_16_1779235954008@teste.com",
+        "email": "filauser_16_1779315463859@teste.com",
         "cor": "vermelho",
         "depositoConfirmado": false,
-        "dataEntrada": "2026-05-20T00:12:34.609Z"
+        "dataEntrada": "2026-05-20T22:18:39.425Z"
       }
     ]
   }

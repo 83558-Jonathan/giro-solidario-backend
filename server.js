@@ -16,6 +16,29 @@ const criarAdmin = require('./src/scripts/seedAdmin')
 const ChatMessage = require('./src/models/ChatMessage')
 const Rodada = require('./src/models/Rodada')
 const jwt = require('jsonwebtoken')
+const {
+  removerVermelhosInadimplentes,
+  processarTransacoesExpiradas
+} = require('./src/controllers/pixController')
+const cron = require('node-cron')
+
+// Executa a cada 1 minuto (ajuste conforme necessidade)
+cron.schedule('* * * * *', () => {
+  console.log('⏰ [CRON] Executando job de expiração de PIX...')
+  processarTransacoesExpiradas().catch(err =>
+    console.error('Erro no job:', err)
+  )
+})
+
+// Executa diariamente à meia-noite (00:00)
+cron.schedule('0 0 * * *', () => {
+  console.log(
+    '⏰ [CRON-DIARIO] Executando limpeza de vermelhos inadimplentes...'
+  )
+  removerVermelhosInadimplentes().catch(err =>
+    console.error('Erro na limpeza diária:', err)
+  )
+})
 
 // ===========================================
 // ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA
@@ -28,7 +51,7 @@ setInterval(async () => {
   } catch (error) {
     console.error('[CRON] Erro na alocação periódica da fila:', error.message)
   }
-}, 30000)
+}, 10000) // a cada 10 segundos
 
 // ===========================================
 // JOB PERIÓDICO: VERIFICAR TRANSAÇÕES PENDENTES (fallback para webhook)
@@ -92,7 +115,7 @@ setInterval(async () => {
   } catch (error) {
     console.error('[JOB-PIX] Erro no job de verificação periódica:', error)
   }
-}, 30000) // a cada 30 segundos
+}, 10000) // a cada 10 segundos
 
 // ===========================================
 // TRUST PROXY (IP real via Cloudflare)

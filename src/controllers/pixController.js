@@ -2,21 +2,22 @@ const abacate = require('../config/abacate')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
 const User = require('../models/User')
-const RodadaService = require('../services/rodadaService')
 const ChatMessage = require('../models/ChatMessage')
 
 // ===========================================
-// VARIÁVEL GLOBAL PARA O SOCKET.IO (inicializada pelo server.js)
+// VARIÁVEL GLOBAL PARA O SOCKET.IO
 // ===========================================
 let io = null
+let rodadaServiceInstance = null // para injeção de dependência
 
-/**
- * Função chamada pelo server.js após a criação do io
- * @param {Object} socketIo - Instância do socket.io
- */
 function initializeIo (socketIo) {
   io = socketIo
   console.log('✅ io inicializado no pixController')
+}
+
+function setRodadaService (service) {
+  rodadaServiceInstance = service
+  console.log('✅ RodadaService injetado no pixController')
 }
 
 const VALOR_VERMELHO = 150
@@ -113,7 +114,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     participante.depositoConfirmado = true
     participante.dataDeposito = new Date()
 
-    // Obter o nome do usuário que pagou
     const usuarioPagador = await User.findById(transacao.pagador)
     const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguém'
 
@@ -121,18 +121,16 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     const pagos = vermelhos.filter(v => v.depositoConfirmado === true)
     const faltam = vermelhos.length - pagos.length
 
-    // NOVO: emitir evento de pagamento confirmado para todos na sala
     if (io) {
       io.to(`rodada-${rodada._id}`).emit('pagamento-confirmado', {
         transacaoId: transacao._id,
         participanteId: transacao.pagador,
-        faltam: faltam,
+        faltam,
         totalVermelhos: vermelhos.length,
         pagos: pagos.length
       })
     }
 
-    // Enviar mensagem automática no chat (se io estiver disponível)
     if (io) {
       const mensagemPagamento = new ChatMessage({
         rodadaId: rodada._id,
@@ -142,7 +140,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
         createdAt: new Date()
       })
       await mensagemPagamento.save()
-
       io.to(`rodada-${rodada._id}`).emit('mensagem', {
         _id: mensagemPagamento._id,
         mensagem: mensagemPagamento.mensagem,
@@ -155,7 +152,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     rodada.totalDepositosConfirmados = pagos.length
     await rodada.save()
 
-    // Remover da fila de espera
+    // Se o usuário estava na fila, remover os campos (pagou, então não precisa mais)
     const usuario = await User.findById(transacao.pagador)
     if (usuario && usuario.aguardandoVermelho) {
       usuario.aguardandoVermelho = false
@@ -181,16 +178,20 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
         await rodada.save()
       }
       try {
-        await RodadaService.avancarRodada(rodada._id)
+        if (rodadaServiceInstance) {
+          await rodadaServiceInstance.avancarRodada(rodada._id)
+        } else {
+          console.error(
+            `❌ [${source}] RodadaService não injetado! Não foi possível avançar a rodada.`
+          )
+        }
 
-        // NOVO: após avançar a rodada, notificar todos na sala
         if (io) {
           io.to(`rodada-${rodada._id}`).emit('rodada-atualizada', {
             rodadaId: rodada._id,
             status: 'concluida'
           })
         }
-
         console.log(
           `✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`
         )
@@ -224,7 +225,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 // ===========================================
 // CRIAR COBRANÇA PIX
 // ===========================================
-exports.criarCobrancaPix = async (req, res) => {
+const criarCobrancaPix = async (req, res) => {
   try {
     const { transacaoId } = req.body
     if (!transacaoId)
@@ -323,7 +324,7 @@ exports.criarCobrancaPix = async (req, res) => {
 // ===========================================
 // VERIFICAR STATUS
 // ===========================================
-exports.verificarStatus = async (req, res) => {
+const verificarStatus = async (req, res) => {
   try {
     const { transacaoId } = req.params
     const transacao = await Transacao.findById(transacaoId)
@@ -392,7 +393,7 @@ exports.verificarStatus = async (req, res) => {
 // ===========================================
 // RENOVAR COBRANÇA
 // ===========================================
-exports.renovarCobrancaPix = async (req, res) => {
+const renovarCobrancaPix = async (req, res) => {
   try {
     const { transacaoId } = req.body
     if (!transacaoId)
@@ -408,7 +409,6 @@ exports.renovarCobrancaPix = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, error: 'Transação não encontrada' })
-
     if (transacao.status !== 'pendente') {
       return res.status(400).json({
         success: false,
@@ -487,8 +487,9 @@ exports.renovarCobrancaPix = async (req, res) => {
 
 // ===========================================
 // CANCELAR EXPIRADO (chamado pelo frontend)
+// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
 // ===========================================
-exports.cancelarExpirado = async (req, res) => {
+const cancelarExpirado = async (req, res) => {
   const { transacaoId } = req.body
   const usuarioId = req.usuario.id
 
@@ -564,24 +565,18 @@ exports.cancelarExpirado = async (req, res) => {
       await transacao.save()
     }
 
+    // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO EM VEZ DE COLOCAR NA FILA
     const usuario = await User.findById(usuarioId)
-    if (usuario && !usuario.aguardandoVermelho) {
-      usuario.aguardandoVermelho = true
-      usuario.rodadaBloqueada = rodada._id
-      usuario.dataEntradaFila = new Date()
-      const ultimoNaFila = await User.findOne({
-        aguardandoVermelho: true
-      }).sort('-posicaoFila')
-      usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1
-      await usuario.save()
+    if (usuario) {
+      await User.deleteOne({ _id: usuarioId })
       console.log(
-        `✅ Usuário ${usuario.nome} colocado na fila (posição ${usuario.posicaoFila})`
+        `🗑️ [CANCELAR-EXPIRADO] Usuário ${usuario.nome} (${usuarioId}) deletado por expiração manual.`
       )
     }
 
     res.json({
       success: true,
-      message: 'Participante removido e colocado na fila de espera'
+      message: 'Participante removido e usuário deletado por inadimplência'
     })
   } catch (error) {
     console.error('Erro no cancelarExpirado:', error)
@@ -591,6 +586,7 @@ exports.cancelarExpirado = async (req, res) => {
 
 // ===========================================
 // PROCESSAR TRANSAÇÕES EXPIRADAS (JOB)
+// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
 // ===========================================
 async function processarTransacoesExpiradas () {
   const agora = new Date()
@@ -609,8 +605,17 @@ async function processarTransacoesExpiradas () {
         'participantes.cor': 'vermelho',
         'participantes.transacaoId': transacao._id
       })
-      if (!rodada) continue
 
+      if (!rodada) {
+        console.log(
+          `[JOB] Transação ${transacao._id} expirada, mas usuário não está mais na rodada. Cancelando transação.`
+        )
+        transacao.status = 'cancelada_expirada'
+        await transacao.save()
+        continue
+      }
+
+      // Remove o participante da rodada
       rodada.participantes = rodada.participantes.filter(
         p => p.transacaoId !== transacao._id
       )
@@ -634,20 +639,22 @@ async function processarTransacoesExpiradas () {
       transacao.status = 'cancelada_expirada'
       await transacao.save()
 
+      // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO (não colocar na fila)
       const usuario = await User.findById(usuarioId)
-      if (!usuario.aguardandoVermelho) {
-        usuario.aguardandoVermelho = true
-        usuario.rodadaBloqueada = rodada._id
-        usuario.dataEntradaFila = new Date()
-        const ultimoNaFila = await User.findOne({
-          aguardandoVermelho: true
-        }).sort('-posicaoFila')
-        usuario.posicaoFila = (ultimoNaFila?.posicaoFila || 0) + 1
-        await usuario.save()
+      if (usuario) {
+        await User.deleteOne({ _id: usuarioId })
+        console.log(
+          `🗑️ [JOB] Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência.`
+        )
       }
-      console.log(
-        `[JOB] Transação ${transacao._id} expirada - usuário ${usuario.nome} removido da rodada ${rodada.nome} e colocado na fila`
-      )
+
+      if (io) {
+        io.to(`rodada-${rodada._id}`).emit('usuario-removido', {
+          usuarioId: usuarioId,
+          rodadaId: rodada._id,
+          motivo: 'expirado'
+        })
+      }
     } catch (err) {
       console.error(`[JOB] Erro ao processar expiração ${transacao._id}:`, err)
     }
@@ -655,14 +662,105 @@ async function processarTransacoesExpiradas () {
 }
 
 // ===========================================
+// REMOVER VERMELHOS INADIMPLENTES (JOB DIÁRIO - 24h)
+// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
+// ===========================================
+async function removerVermelhosInadimplentes () {
+  const agora = new Date()
+  const limiteHoras = 24 // Considerar vermelhos que não pagaram há mais de 24 horas
+  const dataLimite = new Date(agora.getTime() - limiteHoras * 60 * 60 * 1000)
+
+  console.log(
+    `\n🧹 [JOB-DIARIO] Removendo vermelhos que não pagaram há mais de ${limiteHoras} horas (antes de ${dataLimite.toISOString()})`
+  )
+
+  const rodadas = await Rodada.find({
+    status: { $in: ['aguardando', 'em_andamento'] }
+  }).lean()
+  let totalRemovidos = 0
+
+  for (const rodada of rodadas) {
+    let modificado = false
+    const participantesParaRemover = rodada.participantes.filter(
+      p =>
+        p.cor === 'vermelho' &&
+        p.depositoConfirmado === false &&
+        new Date(p.dataEntrada) < dataLimite
+    )
+
+    if (participantesParaRemover.length === 0) continue
+
+    console.log(
+      `   Rodada ${rodada.nome} (${rodada._id}): ${participantesParaRemover.length} vermelho(s) inadimplente(s).`
+    )
+
+    for (const p of participantesParaRemover) {
+      const usuarioId = p.usuario.toString()
+      const transacaoId = p.transacaoId
+
+      await Rodada.updateOne(
+        { _id: rodada._id },
+        {
+          $pull: {
+            participantes: { _id: p._id },
+            vermelhos: usuarioId,
+            azuis: usuarioId,
+            pretos: usuarioId
+          },
+          $unset: { verde: usuarioId }
+        }
+      )
+
+      if (transacaoId) {
+        await Transacao.updateOne(
+          { _id: transacaoId },
+          { $set: { status: 'cancelada_expirada' } }
+        )
+        console.log(`      Transação ${transacaoId} cancelada.`)
+      }
+
+      // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO
+      const usuario = await User.findById(usuarioId)
+      if (usuario) {
+        await User.deleteOne({ _id: usuarioId })
+        console.log(
+          `      🗑️ Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência >24h.`
+        )
+      }
+
+      totalRemovidos++
+      modificado = true
+    }
+
+    if (modificado) {
+      const rodadaAtualizada = await Rodada.findById(rodada._id)
+      const vermelhosRestantes = rodadaAtualizada.participantes.filter(
+        p => p.cor === 'vermelho'
+      )
+      const pagos = vermelhosRestantes.filter(
+        v => v.depositoConfirmado === true
+      )
+      rodadaAtualizada.totalDepositosConfirmados = pagos.length
+      await rodadaAtualizada.save()
+    }
+  }
+
+  console.log(
+    `✅ [JOB-DIARIO] Total de vermelhos removidos (e usuários deletados): ${totalRemovidos}`
+  )
+}
+
+// ===========================================
 // EXPORTAÇÕES
 // ===========================================
 module.exports = {
-  criarCobrancaPix: exports.criarCobrancaPix,
-  verificarStatus: exports.verificarStatus,
-  renovarCobrancaPix: exports.renovarCobrancaPix,
+  criarCobrancaPix,
+  verificarStatus,
+  renovarCobrancaPix,
   processarPagamentoComControle,
-  cancelarExpirado: exports.cancelarExpirado,
+  cancelarExpirado,
   processarTransacoesExpiradas,
-  initializeIo // função para inicializar o io
+  initializeIo,
+  removerVermelhosInadimplentes,
+  setRodadaService
 }

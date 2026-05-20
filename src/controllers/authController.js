@@ -43,6 +43,26 @@ async function getProximaPosicaoFila () {
 }
 
 // ===========================================
+// FUNÇÃO AUXILIAR: Verifica se rodada pode receber vermelho
+// ===========================================
+function rodadaPodeReceberVermelho (rodada) {
+  if (!rodada) return false
+  const temEstrutura = !!(
+    rodada.verde &&
+    Array.isArray(rodada.pretos) &&
+    rodada.pretos.length === 2 &&
+    Array.isArray(rodada.azuis) &&
+    rodada.azuis.length === 4
+  )
+  const podeReceber =
+    rodada.status === 'em_andamento' ||
+    (rodada.status === 'aguardando' && temEstrutura)
+  const vagasVermelho =
+    8 - (rodada.participantes?.filter(p => p.cor === 'vermelho').length || 0)
+  return podeReceber && vagasVermelho > 0
+}
+
+// ===========================================
 // FUNÇÃO AUXILIAR: Buscar rodada disponível para usuário SEM convite
 // ===========================================
 async function buscarRodadaDisponivelParaNovoUsuario () {
@@ -68,7 +88,7 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       }
     }).sort({ createdAt: 1 })
 
-    if (rodadaEmAndamento) {
+    if (rodadaEmAndamento && rodadaPodeReceberVermelho(rodadaEmAndamento)) {
       const vermelhosAtuais = rodadaEmAndamento.participantes.filter(
         p => p.cor === 'vermelho'
       ).length
@@ -77,7 +97,7 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       )
       console.log(`   Status: em_andamento, Vermelhos: ${vermelhosAtuais}/8`)
       console.log(`   → Usuário será adicionado como VERMELHO`)
-      return { rodada: rodadaEmAndamento, tipo: 'vermelho' }
+      return { rodada: rodadaEmAndamento, podeAdicionar: true }
     }
 
     // PRIORIDADE 2: Rodada aguardando com estrutura (pode receber vermelho)
@@ -102,7 +122,10 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       }
     }).sort({ createdAt: 1 })
 
-    if (rodadaAguardandoComEstrutura) {
+    if (
+      rodadaAguardandoComEstrutura &&
+      rodadaPodeReceberVermelho(rodadaAguardandoComEstrutura)
+    ) {
       const vermelhosAtuais = rodadaAguardandoComEstrutura.participantes.filter(
         p => p.cor === 'vermelho'
       ).length
@@ -111,92 +134,34 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       )
       console.log(`   Status: aguardando, Vermelhos: ${vermelhosAtuais}/8`)
       console.log(`   → Usuário será adicionado como VERMELHO`)
-      return { rodada: rodadaAguardandoComEstrutura, tipo: 'vermelho' }
+      return { rodada: rodadaAguardandoComEstrutura, podeAdicionar: true }
     }
 
-    // PRIORIDADE 3: Rodada aguardando (em formação) com menos de 15 participantes
+    // PRIORIDADE 3: Rodada aguardando em formação (sem estrutura) – NÃO adicionar usuário
     const rodadaAguardando = await Rodada.findOne({
       status: 'aguardando',
       $expr: { $lt: [{ $size: '$participantes' }, 15] }
     }).sort({ createdAt: 1 })
 
     if (rodadaAguardando) {
-      const participantesAtuais = rodadaAguardando.participantes.length
-      const temEstrutura = !!(
-        rodadaAguardando.verde &&
-        rodadaAguardando.pretos &&
-        rodadaAguardando.azuis
-      )
-
       console.log(
-        `✅ [SEM CONVITE] Rodada encontrada: ${rodadaAguardando.nome}`
+        `⚠️ [SEM CONVITE] Rodada em formação encontrada: ${rodadaAguardando.nome}, mas sem estrutura. Usuário irá para a fila.`
       )
-      console.log(
-        `   Status: aguardando, Participantes: ${participantesAtuais}/15`
-      )
-      console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`)
-      console.log(
-        `   → Usuário será adicionado como ${
-          temEstrutura ? 'VERMELHO' : 'AMARELO'
-        }`
-      )
-
-      return {
-        rodada: rodadaAguardando,
-        tipo: temEstrutura ? 'vermelho' : 'amarelo'
-      }
     }
 
-    // PRIORIDADE 4: Nenhuma rodada disponível - colocar na FILA DE ESPERA
+    // PRIORIDADE 4: Nenhuma rodada com vaga → ir para FILA
     console.log(
-      `⚠️ [SEM CONVITE] Nenhuma rodada disponível. Usuario entrara na FILA DE ESPERA.`
+      `⚠️ [SEM CONVITE] Nenhuma rodada com vaga disponível. Usuario entrara na FILA DE ESPERA.`
     )
-    return { rodada: null, tipo: 'fila' }
+    return { rodada: null, podeAdicionar: false }
   } catch (error) {
     console.error('❌ [SEM CONVITE] Erro ao buscar rodada:', error)
-    return { rodada: null, tipo: 'erro' }
+    return { rodada: null, podeAdicionar: false }
   }
 }
 
 // ===========================================
-// FUNÇÃO AUXILIAR: Adicionar usuário à rodada (APÓS salvar usuário)
-// ===========================================
-async function adicionarUsuarioRodada (
-  rodada,
-  usuarioId,
-  tipo,
-  indicadorId = null
-) {
-  try {
-    console.log(
-      `\n➕ [ADICIONAR] Adicionando usuário ${usuarioId} à rodada ${
-        rodada.nome
-      } como ${tipo.toUpperCase()}`
-    )
-
-    if (tipo === 'vermelho') {
-      return await RodadaService.adicionarParticipanteVermelho(
-        rodada._id.toString(),
-        usuarioId.toString(),
-        indicadorId
-      )
-    } else if (tipo === 'amarelo') {
-      return await RodadaService.adicionarParticipanteAmarelo(
-        rodada._id.toString(),
-        usuarioId.toString(),
-        indicadorId
-      )
-    } else {
-      throw new Error(`Tipo inválido: ${tipo}`)
-    }
-  } catch (error) {
-    console.error(`❌ [ADICIONAR] Erro ao adicionar usuário:`, error)
-    throw error
-  }
-}
-
-// ===========================================
-// REGISTRAR (CORRIGIDO - COM CAMPOS DE FILA)
+// REGISTRAR (CORRIGIDO - RETORNA QR CODE)
 // ===========================================
 exports.registrar = async (req, res) => {
   try {
@@ -255,9 +220,7 @@ exports.registrar = async (req, res) => {
     usuario.codigoConvite =
       'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase()
 
-    // ===========================================
-    // PRIMEIRO: SALVAR O USUÁRIO
-    // ===========================================
+    // Salvar usuário
     await usuario.save()
     console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
 
@@ -268,6 +231,7 @@ exports.registrar = async (req, res) => {
     let rodadaIdAdicionada = null
     let entrouNaFila = false
     let posicaoFila = null
+    let dadosPagamento = null // NOVO: armazenar dados do PIX
 
     // ===========================================
     // CASO 1: Usuário tem código de convite
@@ -292,124 +256,68 @@ exports.registrar = async (req, res) => {
             indicador._id.toString()
           )
 
-        if (rodadaDoIndicador) {
+        if (rodadaDoIndicador && rodadaPodeReceberVermelho(rodadaDoIndicador)) {
           const vermelhosAtuais = rodadaDoIndicador.participantes.filter(
             p => p.cor === 'vermelho'
           ).length
-          const temEstrutura = !!(
-            rodadaDoIndicador.verde &&
-            rodadaDoIndicador.pretos &&
-            rodadaDoIndicador.azuis
-          )
-
           console.log(
             `\n📋 Processando convite para rodada: ${rodadaDoIndicador.nome}`
           )
-          console.log(`   Status: ${rodadaDoIndicador.status}`)
-          console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NÃO'}`)
           console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`)
+          console.log(
+            `🔴 Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaDoIndicador.nome}`
+          )
 
-          // Se a rodada tem estrutura e tem vaga para vermelho, adiciona como VERMELHO
-          if (temEstrutura && vermelhosAtuais < 8) {
-            console.log(
-              `🔴 Adicionando ${usuario.nome} como VERMELHO na rodada ${rodadaDoIndicador.nome}`
+          try {
+            const resultado = await RodadaService.adicionarParticipanteVermelho(
+              rodadaDoIndicador._id.toString(),
+              usuario._id.toString(),
+              indicador._id.toString()
             )
 
-            try {
-              await RodadaService.adicionarParticipanteVermelho(
-                rodadaDoIndicador._id.toString(),
-                usuario._id.toString(),
-                indicador._id.toString()
-              )
+            rodadaAdicionada = rodadaDoIndicador.nome
+            corAdicionado = 'vermelho'
+            rodadaIdAdicionada = rodadaDoIndicador._id
+            entrouNaFila = false
 
-              rodadaAdicionada = rodadaDoIndicador.nome
-              corAdicionado = 'vermelho'
-              rodadaIdAdicionada = rodadaDoIndicador._id
-              entrouNaFila = false
-
-              console.log(
-                `✅ Usuário ${usuario.nome} adicionado como VERMELHO à rodada ${rodadaDoIndicador.nome}`
-              )
-              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}`
-            } catch (error) {
-              console.error('❌ Erro ao adicionar como vermelho:', error)
-              mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`
+            if (resultado.transacao) {
+              dadosPagamento = resultado.transacao
+              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor} para confirmar.`
+            } else {
+              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}, mas não foi possível gerar o QR Code. Entre em contato.`
             }
-          }
-          // Se a rodada NÃO tem estrutura (ainda em formação), adiciona como AMARELO e marca como aguardando
-          else if (!temEstrutura) {
+
             console.log(
-              `🟡 Adicionando ${usuario.nome} como AMARELO na rodada existente ${rodadaDoIndicador.nome}`
+              `✅ Usuário ${usuario.nome} adicionado como VERMELHO à rodada ${rodadaDoIndicador.nome}`
             )
-            console.log(
-              `   ⏳ Usuário será marcado como AGUARDANDO vaga de vermelho`
-            )
-
-            try {
-              await RodadaService.adicionarParticipanteAmarelo(
-                rodadaDoIndicador._id.toString(),
-                usuario._id.toString(),
-                indicador._id.toString()
-              )
-
-              // MARCAR USUÁRIO COMO AGUARDANDO VERMELHO
-              usuario.aguardandoVermelho = true
-              posicaoFila = await getProximaPosicaoFila()
-              usuario.posicaoFila = posicaoFila
-              usuario.dataEntradaFila = new Date()
-              await usuario.save()
-              entrouNaFila = true
-
-              rodadaAdicionada = rodadaDoIndicador.nome
-              corAdicionado = 'amarelo'
-              rodadaIdAdicionada = rodadaDoIndicador._id
-
-              console.log(
-                `✅ Usuário ${usuario.nome} adicionado como AMARELO na rodada ${rodadaDoIndicador.nome} (aguardando vaga de vermelho)`
-              )
-              mensagemAuto = `Adicionado como AMARELO na rodada ${rodadaDoIndicador.nome}. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
-            } catch (error) {
-              console.error('❌ Erro ao adicionar como amarelo:', error)
-              mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`
-            }
-          }
-          // Se tem estrutura mas está cheia de vermelhos
-          else if (temEstrutura && vermelhosAtuais >= 8) {
-            console.log(
-              `⚠️ Rodada ${rodadaDoIndicador.nome} está cheia de vermelhos (${vermelhosAtuais}/8)`
-            )
-
+          } catch (error) {
+            console.error('❌ Erro ao adicionar como vermelho:', error)
+            mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`
+            // Fallback: colocar na fila
             usuario.aguardandoVermelho = true
             posicaoFila = await getProximaPosicaoFila()
             usuario.posicaoFila = posicaoFila
             usuario.dataEntradaFila = new Date()
             await usuario.save()
             entrouNaFila = true
-
             rodadaAdicionada = null
             corAdicionado = null
-            mensagemAuto = `A rodada do seu convidante está completa. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}. Aguarde uma vaga para VERMELHO.`
-
-            console.log(
-              `✅ Usuario ${usuario.nome} colocado na fila de espera (posição ${posicaoFila})`
-            )
+            mensagemAuto = `Erro ao adicionar à rodada. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
           }
-        }
-        // Se o indicador não tem nenhuma rodada, colocar na fila (NÃO CRIAR RODADA)
-        else {
-          console.log(`⚠️ Indicador ${indicador.nome} não tem rodada.`)
-
+        } else {
+          // Não pode adicionar como vermelho → fila
+          console.log(
+            `⚠️ Rodada do indicador não disponível para receber vermelho. Indo para fila.`
+          )
           usuario.aguardandoVermelho = true
           posicaoFila = await getProximaPosicaoFila()
           usuario.posicaoFila = posicaoFila
           usuario.dataEntradaFila = new Date()
           await usuario.save()
           entrouNaFila = true
-
           rodadaAdicionada = null
           corAdicionado = null
-          mensagemAuto = `Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}. Aguarde uma vaga para VERMELHO.`
-
+          mensagemAuto = `A rodada do seu convidante não pode receber mais vermelhos. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
           console.log(
             `✅ Usuario ${usuario.nome} colocado na fila de espera (posição ${posicaoFila})`
           )
@@ -419,49 +327,49 @@ exports.registrar = async (req, res) => {
           `⚠️ [COM CONVITE] Código ${codigoConvite} não encontrado. Tratando como cadastro sem convite...`
         )
         // Código inválido - tratar como cadastro sem convite
-        const { rodada, tipo } = await buscarRodadaDisponivelParaNovoUsuario()
+        const { rodada, podeAdicionar } =
+          await buscarRodadaDisponivelParaNovoUsuario()
 
-        if (rodada) {
+        if (rodada && podeAdicionar) {
           try {
-            await adicionarUsuarioRodada(rodada, usuario._id, tipo)
-
-            if (tipo === 'amarelo') {
-              usuario.aguardandoVermelho = true
-              posicaoFila = await getProximaPosicaoFila()
-              usuario.posicaoFila = posicaoFila
-              usuario.dataEntradaFila = new Date()
-              await usuario.save()
-              entrouNaFila = true
-            }
-
+            const resultado = await RodadaService.adicionarParticipanteVermelho(
+              rodada._id.toString(),
+              usuario._id.toString(),
+              null
+            )
             rodadaAdicionada = rodada.nome
-            corAdicionado = tipo
+            corAdicionado = 'vermelho'
             rodadaIdAdicionada = rodada._id
-            mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${
-              rodada.nome
-            }`
-            if (tipo === 'amarelo') {
-              mensagemAuto = `Adicionado como AMARELO na rodada ${rodada.nome}. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
+            entrouNaFila = false
+
+            if (resultado.transacao) {
+              dadosPagamento = resultado.transacao
+              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+            } else {
+              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
             }
             console.log(
-              `✅ Usuário ${
-                usuario.nome
-              } adicionado à rodada existente como ${tipo.toUpperCase()}`
+              `✅ Usuário ${usuario.nome} adicionado como VERMELHO à rodada ${rodada.nome}`
             )
           } catch (error) {
-            console.error('❌ Erro ao adicionar usuário à rodada:', error)
-            mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`
+            console.error('❌ Erro ao adicionar como vermelho:', error)
+            usuario.aguardandoVermelho = true
+            posicaoFila = await getProximaPosicaoFila()
+            usuario.posicaoFila = posicaoFila
+            usuario.dataEntradaFila = new Date()
+            await usuario.save()
+            entrouNaFila = true
+            mensagemAuto = `Erro ao adicionar. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
           }
-        } else if (tipo === 'fila') {
+        } else {
+          // Vai para fila
           usuario.aguardandoVermelho = true
           posicaoFila = await getProximaPosicaoFila()
           usuario.posicaoFila = posicaoFila
           usuario.dataEntradaFila = new Date()
           await usuario.save()
           entrouNaFila = true
-          rodadaAdicionada = null
-          corAdicionado = null
-          mensagemAuto = `Você está na FILA DE ESPERA, posição ${posicaoFila}. Aguarde uma vaga para VERMELHO.`
+          mensagemAuto = `Nenhuma vaga disponível. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
           console.log(
             `✅ Usuario ${usuario.nome} colocado na fila de espera (posição ${posicaoFila})`
           )
@@ -477,52 +385,49 @@ exports.registrar = async (req, res) => {
         `\n🚫 [SEM CONVITE] Usuário cadastrando sem código de convite`
       )
 
-      const { rodada, tipo } = await buscarRodadaDisponivelParaNovoUsuario()
+      const { rodada, podeAdicionar } =
+        await buscarRodadaDisponivelParaNovoUsuario()
 
-      if (rodada) {
+      if (rodada && podeAdicionar) {
         try {
-          await adicionarUsuarioRodada(rodada, usuario._id, tipo)
+          const resultado = await RodadaService.adicionarParticipanteVermelho(
+            rodada._id.toString(),
+            usuario._id.toString(),
+            null
+          )
           rodadaAdicionada = rodada.nome
-          corAdicionado = tipo
+          corAdicionado = 'vermelho'
           rodadaIdAdicionada = rodada._id
-          mensagemAuto = `Adicionado como ${tipo.toUpperCase()} na rodada ${
-            rodada.nome
-          }`
-          console.log(
-            `✅ [SEM CONVITE] Usuário ${
-              usuario.nome
-            } adicionado à rodada existente como ${tipo.toUpperCase()}`
-          )
+          entrouNaFila = false
 
-          if (tipo === 'amarelo') {
-            usuario.aguardandoVermelho = true
-            posicaoFila = await getProximaPosicaoFila()
-            usuario.posicaoFila = posicaoFila
-            usuario.dataEntradaFila = new Date()
-            await usuario.save()
-            entrouNaFila = true
-            mensagemAuto = `Adicionado como AMARELO na rodada ${rodada.nome}. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
-            console.log(
-              `   ⏳ Usuário marcado como AGUARDANDO vaga de vermelho (posição ${posicaoFila})`
-            )
+          if (resultado.transacao) {
+            dadosPagamento = resultado.transacao
+            mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+          } else {
+            mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
           }
-        } catch (error) {
-          console.error(
-            '❌ [SEM CONVITE] Erro ao adicionar usuário à rodada:',
-            error
+          console.log(
+            `✅ [SEM CONVITE] Usuário ${usuario.nome} adicionado como VERMELHO à rodada ${rodada.nome}`
           )
-          mensagemAuto = `Erro ao adicionar na rodada: ${error.message}`
+        } catch (error) {
+          console.error('❌ Erro ao adicionar como vermelho:', error)
+          usuario.aguardandoVermelho = true
+          posicaoFila = await getProximaPosicaoFila()
+          usuario.posicaoFila = posicaoFila
+          usuario.dataEntradaFila = new Date()
+          await usuario.save()
+          entrouNaFila = true
+          mensagemAuto = `Erro ao adicionar. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
         }
-      } else if (tipo === 'fila') {
+      } else {
+        // Vai para fila
         usuario.aguardandoVermelho = true
         posicaoFila = await getProximaPosicaoFila()
         usuario.posicaoFila = posicaoFila
         usuario.dataEntradaFila = new Date()
         await usuario.save()
         entrouNaFila = true
-        rodadaAdicionada = null
-        corAdicionado = null
-        mensagemAuto = `Você está na FILA DE ESPERA, posição ${posicaoFila}. Aguarde uma vaga para VERMELHO.`
+        mensagemAuto = `Nenhuma vaga disponível. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
         console.log(
           `✅ [SEM CONVITE] Usuario ${usuario.nome} colocado na fila de espera (posição ${posicaoFila})`
         )
@@ -533,7 +438,7 @@ exports.registrar = async (req, res) => {
     const token = gerarToken(usuario._id)
 
     // ===========================================
-    // MONTAR RESPOSTA COMPLETA
+    // MONTAR RESPOSTA COMPLETA (COM PAGAMENTO)
     // ===========================================
     const response = {
       success: true,
@@ -544,10 +449,9 @@ exports.registrar = async (req, res) => {
         email: usuario.email,
         codigoConvite: usuario.codigoConvite
       },
-      // NOVOS CAMPOS PARA O FRONT-END
       entrouNaFila: entrouNaFila,
       posicaoFila: posicaoFila,
-      automatico: !!rodadaAdicionada, // boolean: true se entrou em rodada, false se foi para fila
+      automatico: !!rodadaAdicionada,
       mensagem: mensagemAuto
     }
 
@@ -556,15 +460,23 @@ exports.registrar = async (req, res) => {
       response.corAtribuida = corAdicionado
     }
 
+    if (dadosPagamento) {
+      response.pagamento = {
+        transacaoId: dadosPagamento.id,
+        qrCode: dadosPagamento.qrCode,
+        qrCodeImage: dadosPagamento.qrCodeImage,
+        valor: dadosPagamento.valor,
+        expiraEm: dadosPagamento.expiraEm
+      }
+    }
+
     console.log(`\n✅ REGISTRO CONCLUÍDO COM SUCESSO!`)
     console.log(`   Usuário: ${usuario.nome}`)
     console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
     console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
     console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`)
-    console.log(
-      `   Aguardando vermelho: ${usuario.aguardandoVermelho || false}`
-    )
+    console.log(`   Pagamento: ${dadosPagamento ? 'QR Code gerado' : 'Nenhum'}`)
     console.log(`${'='.repeat(60)}\n`)
 
     res.status(201).json(response)
@@ -678,7 +590,6 @@ exports.getMe = async (req, res) => {
     usuarioObj.posicaoFila = usuario.posicaoFila || null
     usuarioObj.podeSacar = podeSacar
     usuarioObj.saldoPremio = usuario.saldoPremio
-    // NOVOS CAMPOS
     usuarioObj.estaEmRodadaAtiva = estaEmRodadaAtiva
     usuarioObj.podeJogarNovamente = podeJogarNovamente
 
