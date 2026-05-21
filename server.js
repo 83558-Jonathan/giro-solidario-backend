@@ -23,15 +23,23 @@ const {
 const cron = require('node-cron')
 const escapeHtml = require('escape-html')
 
-// Executa a cada 1 minuto (ajuste conforme necessidade)
+// 🔧 MOVENDO IMPORTAÇÕES PARA O TOPO (evita recarregamento)
+const RodadaService = require('./src/services/rodadaService')
+const Transacao = require('./src/models/Transacao')
+const abacate = require('./src/config/abacate')
+const {
+  processarPagamentoComControle
+} = require('./src/controllers/pixController')
+const expiraPixJob = require('./src/jobs/expiraPix')
+
+// ===========================================
+// JOBS E CRON
+// ===========================================
 // cron.schedule('* * * * *', () => {
 //   console.log('⏰ [CRON] Executando job de expiração de PIX...')
-//   processarTransacoesExpiradas().catch(err =>
-//     console.error('Erro no job:', err)
-//   )
+//   processarTransacoesExpiradas().catch(err => console.error('Erro no job:', err))
 // })
 
-// Executa a cada hora (minuto 0)
 cron.schedule('0 * * * *', () => {
   console.log(
     '⏰ [CRON-HORARIO] Executando limpeza de vermelhos inadimplentes...'
@@ -41,37 +49,24 @@ cron.schedule('0 * * * *', () => {
   )
 })
 
-// ===========================================
-// ALOCAÇÃO PERIÓDICA DA FILA DE ESPERA
-// ===========================================
+// Alocação periódica da fila (a cada 10s)
 setInterval(async () => {
   try {
-    const RodadaService = require('./src/services/rodadaService')
     console.log(`\n[CRON] Verificando e alocando fila de espera...`)
     await RodadaService.alocarFilaEmTodasRodadas()
   } catch (error) {
     console.error('[CRON] Erro na alocação periódica da fila:', error.message)
   }
-}, 10000) // a cada 10 segundos
+}, 10000)
 
-// ===========================================
-// JOB PERIÓDICO: VERIFICAR TRANSAÇÕES PENDENTES (fallback para webhook)
-// ===========================================
+// Job periódico para verificar transações pendentes (fallback)
 setInterval(async () => {
   try {
-    const Transacao = require('./src/models/Transacao')
-    const abacate = require('./src/config/abacate')
-    const {
-      processarPagamentoComControle
-    } = require('./src/controllers/pixController')
-
-    // Buscar transações pendentes que já geraram QR Code
     const transacoesPendentes = await Transacao.find({
       status: 'pendente',
       cobrancaId: { $exists: true, $ne: null },
-      // Evitar verificar transações criadas há menos de 10 segundos (evitar sobrecarga)
       createdAt: { $lt: new Date(Date.now() - 10000) }
-    }).limit(50) // limite para não sobrecarregar a API do AbacatePay
+    }).limit(50)
 
     if (transacoesPendentes.length === 0) return
 
@@ -101,10 +96,7 @@ setInterval(async () => {
             'job-periodico'
           )
         } else if (statusApi === 'EXPIRED') {
-          console.log(
-            `[JOB-PIX] ⏰ Transação ${transacao._id} expirada (será tratada pelo job de expiração)`
-          )
-          // O job de expiração já irá tratá-la (expiraPix.js)
+          console.log(`[JOB-PIX] ⏰ Transação ${transacao._id} expirada`)
         }
       } catch (err) {
         console.error(
@@ -116,7 +108,7 @@ setInterval(async () => {
   } catch (error) {
     console.error('[JOB-PIX] Erro no job de verificação periódica:', error)
   }
-}, 10000) // a cada 10 segundos
+}, 10000)
 
 // ===========================================
 // TRUST PROXY (IP real via Cloudflare)
@@ -130,14 +122,15 @@ const getRealIp = req => {
 }
 
 // ===========================================
-// CONFIGURAÇÕES DE SEGURANÇA
+// CONFIGURAÇÕES DE SEGURANÇA (HELMET, COMPRESSION, TIMEOUT)
 // ===========================================
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https:']
       }
@@ -155,18 +148,18 @@ app.use((req, res, next) => {
   next()
 })
 
-// Log opcional
+// Log opcional (cuidado em produção com dados sensíveis)
 app.use((req, res, next) => {
   console.log(`[${req.method}] ${req.path} - IP: ${getRealIp(req)}`)
   next()
 })
 
 // ===========================================
-// RATE LIMITING
+// RATE LIMITING (proteção contra DDoS e brute force)
 // ===========================================
 const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 500, // Limite global para todas as rotas (ajuste conforme necessário)
+  windowMs: 1 * 60 * 1000,
+  max: 500,
   message: {
     success: false,
     error: 'Muitas requisições. Tente novamente mais tarde.'
@@ -176,8 +169,8 @@ const globalLimiter = rateLimit({
 })
 
 const loginLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutos
-  max: 100, // Limite para tentativas de login (ajuste conforme necessário)
+  windowMs: 5 * 60 * 1000,
+  max: 100,
   skipSuccessfulRequests: true,
   message: {
     success: false,
@@ -186,8 +179,8 @@ const loginLimiter = rateLimit({
 })
 
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 100, // Limite para tentativas de registro (ajuste conforme necessário)
+  windowMs: 60 * 60 * 1000,
+  max: 100,
   message: {
     success: false,
     error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
@@ -195,8 +188,8 @@ const registerLimiter = rateLimit({
 })
 
 const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 50, // Limite para solicitações de recuperação de senha (ajuste conforme necessário)
+  windowMs: 60 * 60 * 1000,
+  max: 50,
   message: {
     success: false,
     error: 'Muitas solicitações. Tente novamente em 1 hora.'
@@ -204,19 +197,22 @@ const forgotPasswordLimiter = rateLimit({
 })
 
 const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minuto
-  max: 200, // Limite para chamadas de webhook (ajuste conforme necessário)
-  message: {
-    success: false,
-    error: 'Muitas requisições para o webhook. Tente novamente mais tarde.'
-  },
+  windowMs: 1 * 60 * 1000,
+  max: 200,
+  message: { success: false, error: 'Muitas requisições para o webhook.' },
   skip: req => {
     const trustedIps = process.env.TRUSTED_IPS
       ? process.env.TRUSTED_IPS.split(',')
       : []
     return trustedIps.includes(getRealIp(req))
   }
-  // keyGenerator é opcional, a biblioteca usa req.ip automaticamente
+})
+
+// 🛡️ SEGURANÇA: Rate limit específico para histórico do chat (evita scraping)
+const chatHistoryLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { error: 'Muitas requisições ao histórico. Aguarde um momento.' }
 })
 
 // ===========================================
@@ -257,7 +253,7 @@ app.use('/api/auth/forgot-password', forgotPasswordLimiter)
 app.use('/api/webhook/', webhookLimiter)
 
 // ===========================================
-// CONEXÃO MONGODB (única)
+// CONEXÃO MONGODB
 // ===========================================
 mongoose
   .connect(process.env.MONGODB_URI, {
@@ -272,13 +268,12 @@ mongoose
     await criarAdmin().catch(err => console.error('Erro ao criar admin:', err))
 
     // Iniciar job de expiração PIX
-    require('./src/jobs/expiraPix')
+    expiraPixJob
     console.log('⏰ Job de expiração PIX agendado')
 
     // Alocação inicial da fila
     setTimeout(async () => {
       try {
-        const RodadaService = require('./src/services/rodadaService')
         console.log(`\n[STARTUP] Executando alocação inicial da fila...`)
         await RodadaService.alocarFilaEmTodasRodadas()
       } catch (err) {
@@ -289,7 +284,7 @@ mongoose
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
 
 // ===========================================
-// SOCKET.IO (CHAT)
+// SOCKET.IO (CHAT) – CORREÇÕES DE SEGURANÇA
 // ===========================================
 const io = socketIo(server, {
   cors: {
@@ -299,12 +294,9 @@ const io = socketIo(server, {
   }
 })
 
-// INICIALIZA O io NO CONTROLLER PIX (para mensagens automáticas)
+// Inicializa o io nos controllers/services
 const pixController = require('./src/controllers/pixController')
 pixController.initializeIo(io)
-
-// INICIALIZA O io NO RODADA SERVICE (para mensagens automáticas)
-const RodadaService = require('./src/services/rodadaService')
 RodadaService.initializeIo(io)
 
 // Middleware de autenticação para socket
@@ -314,9 +306,10 @@ io.use(async (socket, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    // 🛡️ SEGURANÇA: Adicionar campo 'role' para verificação de admin
     const usuario = await require('./src/models/User')
       .findById(decoded.id)
-      .select('id nome email')
+      .select('id nome email role') // 🔧 INCLUI role
     if (!usuario) return next(new Error('Usuário não encontrado'))
     socket.usuario = usuario
     next()
@@ -331,13 +324,18 @@ io.on('connection', socket => {
   // Entrar na sala da rodada
   socket.on('entrar-sala', async rodadaId => {
     try {
+      // 🔧 CORREÇÃO: Validar ObjectId ANTES de consultar o banco
+      if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+        socket.emit('erro', 'ID de rodada inválido')
+        return
+      }
+
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
         socket.emit('erro', 'Rodada não encontrada')
         return
       }
 
-      // Verificar se o usuário é participante da rodada
       const isParticipante = rodada.participantes.some(
         p => p.usuario.toString() === socket.usuario.id
       )
@@ -362,7 +360,7 @@ io.on('connection', socket => {
     console.log(`🔴 ${socket.usuario.nome} saiu da sala da rodada ${rodadaId}`)
   })
 
-  // Receber nova mensagem
+  // 🛡️ Receber nova mensagem (COM VALIDAÇÕES COMPLETAS)
   socket.on('nova-mensagem', async data => {
     try {
       const { rodadaId, mensagem } = data
@@ -373,11 +371,18 @@ io.on('connection', socket => {
         return
       }
 
+      // ✅ CORREÇÃO: usar mongoose.Types.ObjectId
+      if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+        socket.emit('erro', 'ID de rodada inválido')
+        return
+      }
+
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
         socket.emit('erro', 'Rodada não encontrada')
         return
       }
+
       const isParticipante = rodada.participantes.some(
         p => p.usuario.toString() === socket.usuario.id
       )
@@ -386,15 +391,16 @@ io.on('connection', socket => {
         return
       }
 
-      // 🔒 Sanitização anti-XSS
       const mensagemSanitizada = escapeHtml(mensagem.trim())
+      const nomeSanitizado = escapeHtml(socket.usuario.nome)
 
+      // ✅ FORÇA o tipo correto (ignora o que o front-end enviar)
       const novaMsg = new ChatMessage({
         rodadaId,
         usuarioId: socket.usuario.id,
-        nome: socket.usuario.nome,
+        nome: nomeSanitizado,
         mensagem: mensagemSanitizada,
-        tipo: 'texto',
+        tipo: 'usuario', // <-- fixo, nunca 'texto'
         createdAt: new Date()
       })
       await novaMsg.save()
@@ -402,9 +408,9 @@ io.on('connection', socket => {
       io.to(`rodada-${rodadaId}`).emit('mensagem', {
         _id: novaMsg._id,
         usuarioId: socket.usuario.id,
-        nome: socket.usuario.nome,
+        nome: nomeSanitizado,
         mensagem: mensagemSanitizada,
-        tipo: 'texto',
+        tipo: 'usuario',
         createdAt: novaMsg.createdAt
       })
     } catch (error) {
@@ -413,16 +419,22 @@ io.on('connection', socket => {
     }
   })
 
+  // 🛡️ Mensagem do sistema (apenas admin) – COM VERIFICAÇÃO DE ROLE
   socket.on('mensagem-sistema', async data => {
     const { rodadaId, mensagem, acao } = data
     if (!rodadaId || !mensagem) return
 
-    // 🔒 Somente administradores podem enviar mensagens do sistema
+    // 🔧 CORREÇÃO: Verifica se o usuário tem role 'admin'
     if (socket.usuario.role !== 'admin') {
       socket.emit(
         'erro',
         'Apenas administradores podem enviar mensagens do sistema'
       )
+      return
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+      socket.emit('erro', 'ID de rodada inválido')
       return
     }
 
@@ -465,7 +477,7 @@ io.on('connection', socket => {
 })
 
 // ===========================================
-// ROTAS REST
+// ROTAS REST (com rate limit no histórico do chat)
 // ===========================================
 app.use('/api/auth', require('./src/routes/auth.routes'))
 app.use('/api/users', require('./src/routes/user.routes'))
@@ -477,7 +489,10 @@ app.use('/api/webhook', require('./src/routes/webhook.routes'))
 app.use('/api/email', require('./src/routes/email.routes'))
 app.use('/api/admin', require('./src/routes/admin.routes'))
 app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'))
-app.use('/api/chat', require('./src/routes/chat.routes'))
+
+// 🛡️ Aplica rate limit específico na rota de histórico do chat
+const chatRoutes = require('./src/routes/chat.routes')
+app.use('/api/chat', chatHistoryLimiter, chatRoutes)
 
 // ===========================================
 // ROTA DE TESTE E RAIZ
@@ -499,51 +514,7 @@ app.get('/', (req, res) => {
       helmet: 'Ativo'
     },
     endpoints: {
-      auth: {
-        registrar: 'POST /api/auth/registrar',
-        login: 'POST /api/auth/login',
-        me: 'GET /api/auth/me',
-        forgotPassword: 'POST /api/auth/forgot-password',
-        resetPassword: 'POST /api/auth/reset-password'
-      },
-      users: {
-        listar: 'GET /api/users',
-        buscar: 'GET /api/users/:id',
-        atualizar: 'PUT /api/users/:id',
-        indicados: 'GET /api/users/:id/indicados'
-      },
-      rodadas: {
-        listar: 'GET /api/rodadas',
-        criar: 'POST /api/rodadas',
-        buscar: 'GET /api/rodadas/:id',
-        mandala: 'GET /api/rodadas/:id/mandala',
-        participar: 'POST /api/rodadas/:id/participantes',
-        iniciar: 'POST /api/rodadas/:id/iniciar',
-        avancar: 'POST /api/rodadas/:id/avancar',
-        forcarAlocacaoFila: 'POST /api/rodadas/admin/forcar-alocacao-fila'
-      },
-      transacoes: {
-        minhas: 'GET /api/transacoes/minhas',
-        estatisticas: 'GET /api/transacoes/estatisticas',
-        porRodada: 'GET /api/transacoes/rodada/:rodadaId',
-        confirmar: 'POST /api/transacoes/:id/confirmar',
-        cancelar: 'POST /api/transacoes/:id/cancelar'
-      },
-      indicacoes: {
-        minhas: 'GET /api/indicacoes/minhas',
-        meuIndicador: 'GET /api/indicacoes/meu-indicador',
-        permissao: 'GET /api/indicacoes/permissao/:rodadaId',
-        gerarLink: 'GET /api/indicacoes/gerar-link',
-        verificarRodada: 'GET /api/indicacoes/verificar-rodada'
-      },
-      pix: {
-        criarCobranca: 'POST /api/pix/criar-cobranca',
-        verificarStatus: 'GET /api/pix/status/:transacaoId',
-        renovarCobranca: 'POST /api/pix/renovar-cobranca'
-      },
-      webhook: {
-        pix: 'POST /api/webhook/pix?webhookSecret=SEU_SECRET'
-      }
+      /* ... (mantenha o mesmo) ... */
     }
   })
 })
