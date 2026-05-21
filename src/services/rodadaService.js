@@ -11,6 +11,8 @@ const processandoTransacoesVemelhos = new Map()
 
 let ioInstance = null
 
+const processandoVermelhoLock = new Map()
+
 // ===========================================
 // FUNÇÃO AUXILIAR PARA VERIFICAR ESTRUTURA COMPLETA
 // ===========================================
@@ -180,9 +182,16 @@ class RodadaService {
   }
 
   // ===========================================
-  // ADICIONAR PARTICIPANTE VERMELHO (CORRIGIDO + RETORNA TRANSACAO)
+  // ADICIONAR PARTICIPANTE VERMELHO (ATÔMICO, SEM DUPLICATAS)
   // ===========================================
   async adicionarParticipanteVermelho (rodadaId, usuarioId, indicadorId = null) {
+    const lockKey = `${rodadaId}_${usuarioId}`
+    // Aguardar se já estiver processando o mesmo par
+    while (processandoVermelhoLock.has(lockKey)) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    processandoVermelhoLock.set(lockKey, Date.now())
+
     try {
       console.log(`\n${'='.repeat(60)}`)
       console.log(`[VERMELHO] INICIANDO PROCESSO`)
@@ -195,30 +204,25 @@ class RodadaService {
       const estaEmRodadaAtiva = await this.usuarioEstaEmRodadaAtiva(usuarioId)
       if (estaEmRodadaAtiva) {
         console.log(
-          `[VERMELHO] Usuário ${usuarioId} já está em outra rodada ativa.`
+          `[VERMELHO] Usuário ${usuarioId} já está em outra rodada ativa. Colocando na fila.`
         )
-        console.log(`   -> Colocando na fila de espera...`)
         await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
-        const rodada = await Rodada.findById(rodadaId)
+        return { rodada: null, transacao: null }
+      }
+
+      // 2. Buscar rodada mais recente
+      let rodada = await Rodada.findById(rodadaId)
+      if (!rodada) throw new Error('Rodada não encontrada')
+
+      // 3. Verificar se usuário já é participante (com a versão mais atual)
+      if (rodada.participantes.some(p => p.usuario.toString() === usuarioId)) {
+        console.log(
+          `[VERMELHO] Usuário ${usuarioId} já é participante da rodada ${rodada.nome}.`
+        )
         return { rodada, transacao: null }
       }
 
-      // 2. Buscar rodada
-      const rodada = await Rodada.findById(rodadaId)
-      if (!rodada) throw new Error('Rodada nao encontrada')
-
-      console.log(`\nDADOS DA RODADA:`)
-      console.log(`   Nome: ${rodada.nome}`)
-      console.log(`   Status: ${rodada.status}`)
-      console.log(`   Participantes: ${rodada.participantes.length}/15`)
-      console.log(`   Verde definido (campo): ${rodada.verde ? 'SIM' : 'NAO'}`)
-      console.log(`   Pretos: ${rodada.pretos?.length || 0}`)
-      console.log(`   Azuis: ${rodada.azuis?.length || 0}`)
-      console.log(`   Vermelhos: ${rodada.vermelhos?.length || 0}`)
-
-      // ===========================================
-      // CORREÇÃO: se o campo verde estiver vazio, buscar nos participantes
-      // ===========================================
+      // 4. Garantir que a rodada tenha verde (se não tiver, tenta restaurar)
       if (!rodada.verde) {
         const verdeParticipante = rodada.participantes.find(
           p => p.cor === 'verde'
@@ -226,151 +230,113 @@ class RodadaService {
         if (verdeParticipante) {
           rodada.verde = verdeParticipante.usuario
           await rodada.save()
-          console.log(
-            `[VERMELHO] Campo verde restaurado para ${rodada.verde} a partir dos participantes.`
-          )
+          console.log(`[VERMELHO] Campo verde restaurado para ${rodada.verde}.`)
         } else {
-          // Caso não exista verde, a rodada não pode receber vermelhos
           console.log(
-            `[VERMELHO] Rodada sem VERDE e sem participante verde. Colocando usuário na fila.`
+            `[VERMELHO] Rodada ${rodada.nome} não tem VERDE. Usuário vai para fila.`
           )
           await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
           return { rodada, transacao: null }
         }
       }
 
-      // Verificar se a rodada pode receber vermelhos (estrutura + vagas)
+      // 5. Verificar estrutura e vagas
       const temEstrutura = rodadaTemEstruturaCompleta(rodada)
       const podeReceberVermelho =
         rodada.status === 'em_andamento' ||
         (rodada.status === 'aguardando' && temEstrutura)
-
-      console.log(`\nVERIFICANDO SE PODE RECEBER VERMELHO:`)
-      console.log(`   Status: ${rodada.status}`)
-      console.log(`   Tem estrutura: ${temEstrutura ? 'SIM' : 'NAO'}`)
-      console.log(
-        `   Pode receber vermelho: ${podeReceberVermelho ? 'SIM' : 'NAO'}`
-      )
-
-      if (!podeReceberVermelho) {
-        console.log(
-          `[VERMELHO] Rodada NAO pode receber vermelhos. Usuário vai para fila.`
-        )
-        await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
-        return { rodada, transacao: null }
-      }
-
       const vermelhosAtuais = rodada.participantes.filter(
         p => p.cor === 'vermelho'
       ).length
-      console.log(`\nVERIFICANDO VAGAS:`)
-      console.log(`   Vermelhos atuais: ${vermelhosAtuais}/8`)
-
-      if (vermelhosAtuais >= 8) {
+      if (!podeReceberVermelho || vermelhosAtuais >= 8) {
         console.log(
-          `[VERMELHO] Rodada já possui 8 vermelhos. Usuário vai para fila.`
+          `[VERMELHO] Rodada não pode receber vermelhos (estrutura ou cheia). Usuário vai para fila.`
         )
         await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
         return { rodada, transacao: null }
       }
 
-      // Verificar se usuário já está na rodada
-      const existe = rodada.participantes.find(
-        p => p.usuario.toString() === usuarioId
-      )
-      if (existe) throw new Error('Usuario ja esta nesta rodada')
-
-      const usuario = await User.findById(usuarioId)
-      if (!usuario) throw new Error(`Usuario nao encontrado: ${usuarioId}`)
-
-      console.log(`\nADICIONANDO PARTICIPANTE...`)
+      // 6. Adicionar participante de forma atômica (evita duplicata)
       const novaPosicao = rodada.participantes.length + 1
+      const update = {
+        $push: {
+          participantes: {
+            usuario: usuarioId,
+            cor: 'vermelho',
+            posicao: novaPosicao,
+            dataEntrada: new Date(),
+            depositoConfirmado: false,
+            indicadoPor: indicadorId || null
+          }
+        },
+        $addToSet: { vermelhos: usuarioId } // não duplica no array vermelhos
+      }
 
-      rodada.participantes.push({
-        usuario: usuarioId,
-        cor: 'vermelho',
-        posicao: novaPosicao,
-        dataEntrada: new Date(),
-        depositoConfirmado: false,
-        indicadoPor: indicadorId || null
-      })
+      const updatedRodada = await Rodada.findOneAndUpdate(
+        { _id: rodadaId, 'participantes.usuario': { $ne: usuarioId } }, // condição: usuário não está na rodada
+        update,
+        { new: true }
+      )
 
-      rodada.vermelhos.push(usuarioId)
-      console.log(`   Vermelhos agora: ${rodada.vermelhos.length}/8`)
+      if (!updatedRodada) {
+        // Concorrência: outro processo já adicionou o mesmo usuário
+        console.log(
+          `[VERMELHO] Concorrência detectada: usuário ${usuarioId} já foi adicionado.`
+        )
+        return { rodada: await Rodada.findById(rodadaId), transacao: null }
+      }
 
-      // ===========================================
-      // CRIAR TRANSAÇÃO E QR CODE (AGORA O VERDE EXISTE)
-      // ===========================================
+      rodada = updatedRodada
+
+      // 7. Criar transação e QR Code (se verde existe)
       let transacao = null
       const verdeId = rodada.verde
-
-      console.log(`[QR] Verde definido: ${verdeId}. Iniciando processo...`)
-
-      transacao = await Transacao.findOne({
-        pagador: usuarioId,
-        rodada: rodadaId,
-        status: 'pendente'
-      })
-
-      if (!transacao) {
-        console.log(`[QR] Nenhuma transação pendente. Criando nova...`)
-        transacao = new Transacao({
-          tipo: 'deposito',
+      if (verdeId) {
+        transacao = await Transacao.findOne({
           pagador: usuarioId,
-          recebedor: verdeId,
-          valor: 150,
           rodada: rodadaId,
           status: 'pendente'
         })
-        await transacao.save()
-        console.log(`[QR] ✅ Transação criada: ${transacao._id}`)
-
-        console.log(`[QR] Gerando QR Code...`)
-        try {
-          await gerarQrCodeParaTransacao(transacao._id) // função existente
-          console.log(`[QR] ✅ QR Code gerado com sucesso`)
-        } catch (qrError) {
-          console.error(`[QR] ❌ Falha ao gerar QR Code:`, qrError.message)
+        if (!transacao) {
+          transacao = new Transacao({
+            tipo: 'deposito',
+            pagador: usuarioId,
+            recebedor: verdeId,
+            valor: 150,
+            rodada: rodadaId,
+            status: 'pendente'
+          })
+          await transacao.save()
+          // Associar transacaoId ao participante
+          await Rodada.updateOne(
+            { _id: rodadaId, 'participantes.usuario': usuarioId },
+            { $set: { 'participantes.$.transacaoId': transacao._id } }
+          )
+          // Gerar QR Code
+          try {
+            await gerarQrCodeParaTransacao(transacao._id)
+            console.log(
+              `[QR] ✅ QR Code gerado com sucesso para transação ${transacao._id}`
+            )
+          } catch (qrError) {
+            console.error(`[QR] ❌ Falha ao gerar QR Code:`, qrError.message)
+          }
+        } else {
+          console.log(
+            `[QR] ♻️ Transação já existente reaproveitada: ${transacao._id}`
+          )
         }
-      } else {
-        console.log(
-          `[QR] ♻️ Transação já existente reaproveitada: ${transacao._id}`
-        )
       }
 
-      // Associar transacaoId ao participante
-      const participante = rodada.participantes.find(
-        p => p.usuario.toString() === usuarioId
-      )
-      if (participante && !participante.transacaoId) {
-        participante.transacaoId = transacao._id
-        console.log(`[QR] transacaoId atribuído: ${transacao._id}`)
-      }
-
-      // Atualizar indicação se houver
-      if (indicadorId) {
-        await User.findByIdAndUpdate(usuarioId, { indicadoPor: indicadorId })
-        await User.findByIdAndUpdate(indicadorId, {
-          $inc: { totalIndicacoes: 1 },
-          $push: { meusIndicados: usuarioId }
-        })
-      }
-
-      // Salvar rodada
-      await rodada.save()
-
-      // Verificar completude (se chegou a 15 participantes)
+      // 8. Se completou 15 participantes, iniciar rodada
       if (
         rodada.participantes.length === 15 &&
-        rodada.status !== 'em_andamento'
+        rodada.status === 'aguardando'
       ) {
-        // Se a rodada ainda está 'aguardando' mas já tem 15, iniciar automaticamente
-        if (rodada.status === 'aguardando') {
-          console.log(
-            `Rodada ${rodada.nome} completou 15 participantes! Iniciando...`
-          )
-          await this.iniciarRodada(rodadaId)
-        }
+        console.log(
+          `Rodada ${rodada.nome} completou 15 participantes! Iniciando...`
+        )
+        await this.iniciarRodada(rodadaId)
       }
 
       // Preparar dados da transação para retorno
@@ -387,7 +353,7 @@ class RodadaService {
       }
 
       console.log(`\n[VERMELHO] PROCESSO CONCLUÍDO COM SUCESSO!`)
-      console.log(`   Usuario: ${usuario.nome}`)
+      console.log(`   Usuario: ${(await User.findById(usuarioId)).nome}`)
       console.log(`   Rodada: ${rodada.nome}`)
       console.log(
         `   Transação: ${transacaoData ? transacaoData.id : 'nenhuma'}`
@@ -398,6 +364,8 @@ class RodadaService {
     } catch (error) {
       console.error(`\n[VERMELHO] ERRO:`, error)
       throw error
+    } finally {
+      processandoVermelhoLock.delete(lockKey)
     }
   }
 
@@ -929,8 +897,8 @@ class RodadaService {
     console.log(`${'='.repeat(60)}`)
 
     try {
-      // Buscar TODAS as rodadas que podem receber vermelhos
-      const rodadasComVagas = await Rodada.find({
+      // Buscar rodadas que podem receber vermelhos (base inicial)
+      let rodadasComVagas = await Rodada.find({
         status: { $in: ['aguardando', 'em_andamento'] },
         $expr: {
           $lt: [
@@ -954,22 +922,24 @@ class RodadaService {
         return 0
       }
 
-      // Calcular TOTAL de vagas disponíveis
+      // Calcular total de vagas inicial (apenas para informação)
       let totalVagas = 0
       for (const rodada of rodadasComVagas) {
         const vermelhosAtuais = rodada.participantes.filter(
           p => p.cor === 'vermelho'
         ).length
-        const vagas = 8 - vermelhosAtuais
-        totalVagas += vagas
-        console.log(`   ${rodada.nome}: ${vagas} vagas (${vermelhosAtuais}/8)`)
+        totalVagas += 8 - vermelhosAtuais
+        console.log(
+          `   ${rodada.nome}: ${
+            8 - vermelhosAtuais
+          } vagas (${vermelhosAtuais}/8)`
+        )
       }
 
-      // Buscar TODOS os usuários na fila (ordem FIFO)
+      // Buscar usuários na fila (ordem FIFO)
       const filaUsuarios = await User.find({ aguardandoVermelho: true }).sort({
         posicaoFila: 1
       })
-
       if (filaUsuarios.length === 0) {
         console.log(`   Nenhum usuário na fila`)
         alocandoFila = false
@@ -988,19 +958,52 @@ class RodadaService {
       let alocados = 0
       let indexFila = 0
 
-      // Percorrer TODAS as rodadas com vagas
-      for (const rodada of rodadasComVagas) {
-        let vagasRestantes =
-          8 - rodada.participantes.filter(p => p.cor === 'vermelho').length
-        console.log(`\n   Processando ${rodada.nome}: ${vagasRestantes} vagas`)
+      // Percorrer rodadas (uma a uma, recarregando a cada iteração)
+      for (
+        let i = 0;
+        i < rodadasComVagas.length && indexFila < filaUsuarios.length;
+        i++
+      ) {
+        // Recarregar a rodada atual (mais recente)
+        let rodadaAtual = await Rodada.findById(rodadasComVagas[i]._id)
+        if (!rodadaAtual) continue
+
+        let vermelhosAtuais = rodadaAtual.participantes.filter(
+          p => p.cor === 'vermelho'
+        ).length
+        if (vermelhosAtuais >= 8) {
+          console.log(`   Rodada ${rodadaAtual.nome} já está cheia. Ignorando.`)
+          continue
+        }
+
+        let vagasRestantes = 8 - vermelhosAtuais
+        console.log(
+          `\n   Processando ${rodadaAtual.nome}: ${vagasRestantes} vagas`
+        )
 
         while (vagasRestantes > 0 && indexFila < filaUsuarios.length) {
+          // Recarregar a rodada a cada iteração para garantir dados atuais
+          rodadaAtual = await Rodada.findById(rodadaAtual._id)
+          if (!rodadaAtual) break
+
+          vermelhosAtuais = rodadaAtual.participantes.filter(
+            p => p.cor === 'vermelho'
+          ).length
+          if (vermelhosAtuais >= 8) {
+            console.log(
+              `   Rodada ${rodadaAtual.nome} agora está cheia. Saindo do loop.`
+            )
+            break
+          }
+          vagasRestantes = 8 - vermelhosAtuais
+          if (vagasRestantes <= 0) break
+
           const usuario = filaUsuarios[indexFila]
           console.log(
             `      Alocando Pos ${usuario.posicaoFila}: ${usuario.nome}`
           )
 
-          // Verificar consistência
+          // Verificar consistência do usuário na fila
           const usuarioAtual = await User.findById(usuario._id)
           if (!usuarioAtual.aguardandoVermelho) {
             console.log(`         ⚠️ Usuário não está mais na fila. Pulando...`)
@@ -1008,231 +1011,139 @@ class RodadaService {
             continue
           }
 
-          // Verificação do bloqueio: não alocar na mesma rodada da qual foi removido
+          // Bloqueio de rodada
           if (
             usuarioAtual.rodadaBloqueada &&
-            usuarioAtual.rodadaBloqueada.toString() === rodada._id.toString()
+            usuarioAtual.rodadaBloqueada.toString() ===
+              rodadaAtual._id.toString()
           ) {
             console.log(
-              `         ⛔ Usuário ${usuarioAtual.nome} está BLOQUEADO para esta rodada (removido anteriormente). Avançando na fila...`
+              `         ⛔ Usuário bloqueado para esta rodada. Avançando...`
             )
             indexFila++
             continue
           }
 
+          // Verificar se já está em outra rodada ativa
           const emRodadaAtiva = await this.usuarioEstaEmRodadaAtiva(usuario._id)
           if (emRodadaAtiva) {
             console.log(
               `         ⚠️ Usuário já está em rodada ativa. Removendo da fila...`
             )
-            usuarioAtual.aguardandoVermelho = false
-            usuarioAtual.posicaoFila = null
-            usuarioAtual.dataEntradaFila = null
-            usuarioAtual.rodadaBloqueada = null
-            await usuarioAtual.save()
+            await User.updateOne(
+              { _id: usuario._id },
+              {
+                aguardandoVermelho: false,
+                posicaoFila: null,
+                dataEntradaFila: null,
+                rodadaBloqueada: null
+              }
+            )
             indexFila++
             continue
           }
 
-          // Verificar se já está nesta rodada
-          const usuarioJaNaRodada = rodada.participantes.some(
+          // Verificar se já está nesta mesma rodada
+          const jaNaRodada = rodadaAtual.participantes.some(
             p => p.usuario.toString() === usuario._id.toString()
           )
-          if (usuarioJaNaRodada) {
+          if (jaNaRodada) {
             console.log(
               `         ⚠️ Usuário já está nesta rodada. Removendo da fila...`
             )
-            usuarioAtual.aguardandoVermelho = false
-            usuarioAtual.posicaoFila = null
-            usuarioAtual.dataEntradaFila = null
-            usuarioAtual.rodadaBloqueada = null
-            await usuarioAtual.save()
+            await User.updateOne(
+              { _id: usuario._id },
+              {
+                aguardandoVermelho: false,
+                posicaoFila: null,
+                dataEntradaFila: null,
+                rodadaBloqueada: null
+              }
+            )
             indexFila++
             continue
           }
 
           // Log antes da adição
           console.log(
-            `[ALOCAR FILA] Rodada ${rodada.nome} tem verde? ${
-              rodada.verde ? 'SIM (' + rodada.verde + ')' : 'NÃO'
+            `[ALOCAR FILA] Rodada ${rodadaAtual.nome} tem verde? ${
+              rodadaAtual.verde ? 'SIM (' + rodadaAtual.verde + ')' : 'NÃO'
             }`
           )
-          console.log(`[ALOCAR FILA] Status da rodada: ${rodada.status}`)
+          console.log(`[ALOCAR FILA] Status da rodada: ${rodadaAtual.status}`)
           console.log(
-            `[ALOCAR FILA] Total vermelhos atuais: ${
-              rodada.participantes.filter(p => p.cor === 'vermelho').length
-            }/8`
+            `[ALOCAR FILA] Total vermelhos atuais: ${vermelhosAtuais}/8`
           )
 
+          let adicionado = false
           try {
-            // Adicionar como VERMELHO (agora retorna objeto com rodada e transacao)
+            // Tentar adicionar como VERMELHO (método atômico)
             const resultado = await this.adicionarParticipanteVermelho(
-              rodada._id.toString(),
-              usuario._id.toString(),
+              rodadaAtual._id,
+              usuario._id,
               null
             )
 
-            // Log sobre a transação gerada (se houver)
-            if (resultado.transacao) {
+            // Confirmar se foi adicionado
+            const rodadaDepois = await Rodada.findById(rodadaAtual._id)
+            adicionado = rodadaDepois.participantes.some(
+              p => p.usuario.toString() === usuario._id.toString()
+            )
+
+            if (adicionado) {
               console.log(
                 `         ✅ Transação criada com QR Code para ${usuario.nome}.`
               )
+              console.log(`[ALOCAR FILA] Participante adicionado? SIM`)
             } else {
               console.log(
                 `         ⚠️ Transação NÃO gerada para ${usuario.nome} (rodada sem verde ou erro).`
               )
+              console.log(`[ALOCAR FILA] Participante adicionado? NÃO`)
             }
-
-            // Após adicionar, verificar se o participante foi salvo corretamente
-            const rodadaAtualizada = await Rodada.findById(rodada._id)
-            const participanteAdicionado = rodadaAtualizada.participantes.find(
-              p => p.usuario.toString() === usuario._id.toString()
-            )
-            console.log(
-              `[ALOCAR FILA] Participante adicionado? ${
-                participanteAdicionado ? 'SIM' : 'NÃO'
-              }`
-            )
-            if (participanteAdicionado) {
-              console.log(`   Cor: ${participanteAdicionado.cor}`)
-              console.log(
-                `   transacaoId: ${
-                  participanteAdicionado.transacaoId || 'NÃO DEFINIDO'
-                }`
-              )
-            }
-
-            // Limpar bloqueio após alocar
-            usuarioAtual.rodadaBloqueada = null
-            await usuarioAtual.save()
-
-            // Verificar se tem saldo para pagar automaticamente
-            const usuarioAlocado = await User.findById(usuario._id)
-            if (usuarioAlocado && (usuarioAlocado.saldoPremio || 0) >= 150) {
-              // 1. Cancelar qualquer saque pendente do usuário
-              const SolicitacaoSaque = require('../models/SolicitacaoSaque')
-              const saquePendente = await SolicitacaoSaque.findOne({
-                usuario: usuario._id,
-                status: 'pendente'
-              })
-              if (saquePendente) {
-                saquePendente.status = 'recusado'
-                saquePendente.motivoRecusa =
-                  'Cancelado por reentrada automática na fila'
-                saquePendente.dataRecusa = new Date()
-                await saquePendente.save()
-                console.log(
-                  `⏳ Saque pendente cancelado para ${usuarioAlocado.nome}`
-                )
-              }
-
-              // 2. Garantir que a transação existe
-              let transacao = await Transacao.findOne({
-                pagador: usuario._id,
-                rodada: rodada._id
-              })
-              if (!transacao) {
-                const rodadaAtual = await Rodada.findById(rodada._id)
-                if (!rodadaAtual.verde) {
-                  console.log(
-                    `⚠️ Rodada ${rodadaAtual.nome} ainda sem VERDE. Transação será criada depois.`
-                  )
-                } else {
-                  transacao = new Transacao({
-                    tipo: 'deposito',
-                    pagador: usuario._id,
-                    recebedor: rodadaAtual.verde,
-                    valor: 150,
-                    rodada: rodada._id,
-                    status: 'pendente'
-                  })
-                  await transacao.save()
-                  const participante = rodadaAtual.participantes.find(
-                    p => p.usuario.toString() === usuario._id.toString()
-                  )
-                  if (participante) {
-                    participante.transacaoId = transacao._id
-                    await rodadaAtual.save()
-                  }
-                  console.log(
-                    `✅ Transação criada para ${usuarioAlocado.nome} na rodada ${rodadaAtual.nome}`
-                  )
-                }
-              }
-
-              // 3. Se a transação existe e está pendente, confirmar com saldo
-              if (transacao && transacao.status === 'pendente') {
-                transacao.status = 'confirmado'
-                transacao.dataConfirmacao = new Date()
-                transacao.metadata = {
-                  pagoComSaldo: true,
-                  alocadoDaFila: true,
-                  valorDescontado: 150
-                }
-                await transacao.save()
-
-                const rodadaAtualizada = await Rodada.findById(rodada._id)
-                const participante = rodadaAtualizada.participantes.find(
-                  p => p.usuario.toString() === usuario._id.toString()
-                )
-                if (participante) {
-                  participante.depositoConfirmado = true
-                  participante.dataDeposito = new Date()
-                  participante.comprovantePix = 'PAGO_COM_SALDO_FILA'
-                  participante.transacaoId = transacao._id
-                }
-
-                const vermelhos = rodadaAtualizada.participantes.filter(
-                  p => p.cor === 'vermelho'
-                )
-                const vermelhosPagos = vermelhos.filter(
-                  v => v.depositoConfirmado === true
-                )
-                rodadaAtualizada.totalDepositosConfirmados =
-                  vermelhosPagos.length
-                await rodadaAtualizada.save()
-
-                const novoSaldo = (usuarioAlocado.saldoPremio || 0) - 150
-                await User.findByIdAndUpdate(usuario._id, {
-                  $set: { saldoPremio: novoSaldo }
-                })
-                console.log(
-                  `💰 Usuário ${usuarioAlocado.nome} pagou automaticamente com saldo. Restante: R$ ${novoSaldo}`
-                )
-
-                if (
-                  vermelhosPagos.length === vermelhos.length &&
-                  vermelhos.length === 8
-                ) {
-                  await this.verificarEAvancarSeNecessario(rodada._id)
-                }
-              }
-            }
-
-            // Remover da fila (garantia)
-            usuarioAtual.aguardandoVermelho = false
-            usuarioAtual.posicaoFila = null
-            usuarioAtual.dataEntradaFila = null
-            await usuarioAtual.save()
-
-            console.log(`         ✅ Alocado como VERMELHO na ${rodada.nome}`)
-            alocados++
-            indexFila++
-            vagasRestantes--
           } catch (error) {
             console.error(
-              `         ❌ Erro ao alocar ${usuario.nome}:`,
-              error.message
+              `         ❌ Erro ao adicionar participante: ${error.message}`
+            )
+            adicionado = false
+          }
+
+          if (adicionado) {
+            // Limpar bloqueio e remover da fila
+            await User.updateOne(
+              { _id: usuario._id },
+              {
+                aguardandoVermelho: false,
+                posicaoFila: null,
+                dataEntradaFila: null,
+                rodadaBloqueada: null
+              }
+            )
+            console.log(
+              `         ✅ Alocado como VERMELHO na ${rodadaAtual.nome}`
+            )
+            alocados++
+            indexFila++
+            // Recarregar a rodada para a próxima iteração
+            rodadaAtual = await Rodada.findById(rodadaAtual._id)
+            vermelhosAtuais = rodadaAtual.participantes.filter(
+              p => p.cor === 'vermelho'
+            ).length
+            vagasRestantes = 8 - vermelhosAtuais
+          } else {
+            // Falha na adição: apenas avança o índice (não remove da fila)
+            console.log(
+              `         ⚠️ Falha ao alocar ${usuario.nome}. Mantendo na fila.`
             )
             indexFila++
           }
-        }
+        } // fim while
 
         if (indexFila >= filaUsuarios.length) {
           console.log(`   Fim da fila alcançado`)
           break
         }
-      }
+      } // fim for
 
       const restantes = await User.countDocuments({ aguardandoVermelho: true })
       console.log(

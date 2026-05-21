@@ -21,6 +21,7 @@ const {
   processarTransacoesExpiradas
 } = require('./src/controllers/pixController')
 const cron = require('node-cron')
+const escapeHtml = require('escape-html')
 
 // Executa a cada 1 minuto (ajuste conforme necessidade)
 // cron.schedule('* * * * *', () => {
@@ -385,11 +386,14 @@ io.on('connection', socket => {
         return
       }
 
+      // 🔒 Sanitização anti-XSS
+      const mensagemSanitizada = escapeHtml(mensagem.trim())
+
       const novaMsg = new ChatMessage({
         rodadaId,
         usuarioId: socket.usuario.id,
         nome: socket.usuario.nome,
-        mensagem: mensagem.trim(),
+        mensagem: mensagemSanitizada,
         tipo: 'texto',
         createdAt: new Date()
       })
@@ -399,7 +403,7 @@ io.on('connection', socket => {
         _id: novaMsg._id,
         usuarioId: socket.usuario.id,
         nome: socket.usuario.nome,
-        mensagem: mensagem.trim(),
+        mensagem: mensagemSanitizada,
         tipo: 'texto',
         createdAt: novaMsg.createdAt
       })
@@ -413,6 +417,15 @@ io.on('connection', socket => {
     const { rodadaId, mensagem, acao } = data
     if (!rodadaId || !mensagem) return
 
+    // 🔒 Somente administradores podem enviar mensagens do sistema
+    if (socket.usuario.role !== 'admin') {
+      socket.emit(
+        'erro',
+        'Apenas administradores podem enviar mensagens do sistema'
+      )
+      return
+    }
+
     try {
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
@@ -420,20 +433,11 @@ io.on('connection', socket => {
         return
       }
 
-      const isParticipante = rodada.participantes.some(
-        p => p.usuario.toString() === socket.usuario.id
-      )
-      if (!isParticipante) {
-        socket.emit(
-          'erro',
-          'Você não tem permissão para enviar mensagens do sistema'
-        )
-        return
-      }
+      const mensagemSanitizada = escapeHtml(mensagem.trim())
 
       const novaMsg = new ChatMessage({
         rodadaId,
-        mensagem: mensagem.trim(),
+        mensagem: mensagemSanitizada,
         tipo: 'sistema',
         acao: acao || null,
         createdAt: new Date()
