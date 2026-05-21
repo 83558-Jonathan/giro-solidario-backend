@@ -23,20 +23,20 @@ const {
 const cron = require('node-cron')
 
 // Executa a cada 1 minuto (ajuste conforme necessidade)
-cron.schedule('* * * * *', () => {
-  console.log('⏰ [CRON] Executando job de expiração de PIX...')
-  processarTransacoesExpiradas().catch(err =>
-    console.error('Erro no job:', err)
-  )
-})
+// cron.schedule('* * * * *', () => {
+//   console.log('⏰ [CRON] Executando job de expiração de PIX...')
+//   processarTransacoesExpiradas().catch(err =>
+//     console.error('Erro no job:', err)
+//   )
+// })
 
-// Executa diariamente à meia-noite (00:00)
-cron.schedule('0 0 * * *', () => {
+// Executa a cada hora (minuto 0)
+cron.schedule('0 * * * *', () => {
   console.log(
-    '⏰ [CRON-DIARIO] Executando limpeza de vermelhos inadimplentes...'
+    '⏰ [CRON-HORARIO] Executando limpeza de vermelhos inadimplentes...'
   )
   removerVermelhosInadimplentes().catch(err =>
-    console.error('Erro na limpeza diária:', err)
+    console.error('Erro na limpeza horária:', err)
   )
 })
 
@@ -164,8 +164,8 @@ app.use((req, res, next) => {
 // RATE LIMITING
 // ===========================================
 const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 500,
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 500, // Limite global para todas as rotas (ajuste conforme necessário)
   message: {
     success: false,
     error: 'Muitas requisições. Tente novamente mais tarde.'
@@ -175,8 +175,8 @@ const globalLimiter = rateLimit({
 })
 
 const loginLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 100,
+  windowMs: 5 * 60 * 1000, // 5 minutos
+  max: 100, // Limite para tentativas de login (ajuste conforme necessário)
   skipSuccessfulRequests: true,
   message: {
     success: false,
@@ -185,8 +185,8 @@ const loginLimiter = rateLimit({
 })
 
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 100,
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 100, // Limite para tentativas de registro (ajuste conforme necessário)
   message: {
     success: false,
     error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
@@ -194,8 +194,8 @@ const registerLimiter = rateLimit({
 })
 
 const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 50,
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 50, // Limite para solicitações de recuperação de senha (ajuste conforme necessário)
   message: {
     success: false,
     error: 'Muitas solicitações. Tente novamente em 1 hora.'
@@ -203,8 +203,12 @@ const forgotPasswordLimiter = rateLimit({
 })
 
 const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 200,
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 200, // Limite para chamadas de webhook (ajuste conforme necessário)
+  message: {
+    success: false,
+    error: 'Muitas requisições para o webhook. Tente novamente mais tarde.'
+  },
   skip: req => {
     const trustedIps = process.env.TRUSTED_IPS
       ? process.env.TRUSTED_IPS.split(',')

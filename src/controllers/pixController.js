@@ -667,37 +667,84 @@ async function processarTransacoesExpiradas () {
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
-  const limiteHoras = 24 // Considerar vermelhos que não pagaram há mais de 24 horas
-  const dataLimite = new Date(agora.getTime() - limiteHoras * 60 * 60 * 1000)
+  const UMA_HORA_EM_MS = 60 * 60 * 1000
+  const dataLimite = new Date(agora.getTime() - UMA_HORA_EM_MS)
 
   console.log(
-    `\n🧹 [JOB-DIARIO] Removendo vermelhos que não pagaram há mais de ${limiteHoras} horas (antes de ${dataLimite.toISOString()})`
+    `\n🧹 [JOB-HORARIO] Removendo vermelhos com PIX expirado há mais de 1 hora (antes de ${dataLimite.toISOString()})`
   )
 
+  // Busca rodadas ativas
   const rodadas = await Rodada.find({
     status: { $in: ['aguardando', 'em_andamento'] }
   }).lean()
+
   let totalRemovidos = 0
 
   for (const rodada of rodadas) {
-    let modificado = false
-    const participantesParaRemover = rodada.participantes.filter(
-      p =>
-        p.cor === 'vermelho' &&
-        p.depositoConfirmado === false &&
-        new Date(p.dataEntrada) < dataLimite
+    // Filtra participantes vermelhos não pagos
+    const vermelhosNaoPagos = rodada.participantes.filter(
+      p => p.cor === 'vermelho' && p.depositoConfirmado === false
     )
+
+    if (vermelhosNaoPagos.length === 0) continue
+
+    // Coleta todos os transactionIds dos participantes
+    const transacaoIds = vermelhosNaoPagos
+      .map(p => p.transacaoId)
+      .filter(id => id) // remove null/undefined
+
+    // Busca em lote as transações correspondentes
+    const transacoes = await Transacao.find({
+      _id: { $in: transacaoIds }
+    }).select('_id metadata.status') // só o necessário
+
+    const mapTransacao = new Map()
+    transacoes.forEach(t => mapTransacao.set(t._id.toString(), t))
+
+    // Identifica quais participantes devem ser removidos
+    const participantesParaRemover = vermelhosNaoPagos.filter(p => {
+      // Caso 1: não tem transação associada (inconsistência) -> remove
+      if (!p.transacaoId) {
+        console.log(
+          `   ⚠️ Participante ${p.usuario} sem transação. Será removido.`
+        )
+        return true
+      }
+
+      const transacao = mapTransacao.get(p.transacaoId.toString())
+      // Caso 2: transação não encontrada -> remove
+      if (!transacao) {
+        console.log(
+          `   ⚠️ Transação ${p.transacaoId} não encontrada. Removendo participante.`
+        )
+        return true
+      }
+
+      // Caso 3: usa a data de expiração real do PIX
+      const expiraEm = transacao.metadata?.expiraEm
+      if (!expiraEm) {
+        // Se não tem expiraEm, usa dataEntrada (fallback)
+        return new Date(p.dataEntrada) < dataLimite
+      }
+
+      // Verifica se a expiração já passou
+      return new Date(expiraEm) < agora
+    })
 
     if (participantesParaRemover.length === 0) continue
 
     console.log(
-      `   Rodada ${rodada.nome} (${rodada._id}): ${participantesParaRemover.length} vermelho(s) inadimplente(s).`
+      `   Rodada ${rodada.nome} (${rodada._id}): ${participantesParaRemover.length} vermelho(s) inadimplente(s) por expiração.`
     )
+
+    let modificado = false
 
     for (const p of participantesParaRemover) {
       const usuarioId = p.usuario.toString()
       const transacaoId = p.transacaoId
 
+      // 1. Remove o participante da rodada (todos os arrays)
       await Rodada.updateOne(
         { _id: rodada._id },
         {
@@ -711,6 +758,7 @@ async function removerVermelhosInadimplentes () {
         }
       )
 
+      // 2. Cancela a transação se existir
       if (transacaoId) {
         await Transacao.updateOne(
           { _id: transacaoId },
@@ -719,12 +767,12 @@ async function removerVermelhosInadimplentes () {
         console.log(`      Transação ${transacaoId} cancelada.`)
       }
 
-      // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO
+      // 3. Deleta o usuário (conforme sua regra)
       const usuario = await User.findById(usuarioId)
       if (usuario) {
         await User.deleteOne({ _id: usuarioId })
         console.log(
-          `      🗑️ Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência >24h.`
+          `      🗑️ Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência.`
         )
       }
 
@@ -732,6 +780,7 @@ async function removerVermelhosInadimplentes () {
       modificado = true
     }
 
+    // 4. Atualiza o contador de depósitos confirmados na rodada
     if (modificado) {
       const rodadaAtualizada = await Rodada.findById(rodada._id)
       const vermelhosRestantes = rodadaAtualizada.participantes.filter(
@@ -746,7 +795,7 @@ async function removerVermelhosInadimplentes () {
   }
 
   console.log(
-    `✅ [JOB-DIARIO] Total de vermelhos removidos (e usuários deletados): ${totalRemovidos}`
+    `✅ [JOB-HORARIO] Total de vermelhos removidos (e usuários deletados): ${totalRemovidos}`
   )
 }
 
