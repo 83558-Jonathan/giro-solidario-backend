@@ -1,37 +1,34 @@
 const mongoose = require('mongoose');
 
-/**
- * Middleware para validar ObjectIds em parâmetros de rota e corpo da requisição.
- * Não lança exceções se os campos não existirem.
- */
-function validateObjectId(req, res, next) {
-  // Lista de campos que podem conter IDs
-  const camposPossiveis = ['id', 'transacaoId', 'rodadaId', 'usuarioId', 'solicitacaoId'];
+function validateObjectId(paramNames = []) {
+  return (req, res, next) => {
+    const defaultFields = ['id', 'rodadaId', 'transacaoId', 'usuarioId', 'solicitacaoId'];
+    const fieldsToCheck = paramNames.length > 0 ? paramNames : defaultFields;
 
-  // Garantir que req.params e req.body existam (segurança extra)
-  const params = req.params || {};
-  const body = req.body || {};
-
-  for (const campo of camposPossiveis) {
-    // Verifica primeiro em req.params
-    let valor = params[campo];
-    if (valor !== undefined && valor !== null) {
-      if (!mongoose.Types.ObjectId.isValid(valor.toString())) {
-        return res.status(400).json({ success: false, error: `ID inválido: ${campo}` });
-      }
-      continue; // já validou, pula para o próximo campo
-    }
-
-    // Verifica depois em req.body
-    valor = body[campo];
-    if (valor !== undefined && valor !== null && typeof valor === 'string') {
-      if (!mongoose.Types.ObjectId.isValid(valor)) {
-        return res.status(400).json({ success: false, error: `ID inválido: ${campo}` });
+    // Verificar em req.params (sempre existe, mas pode não ter a chave)
+    for (const field of fieldsToCheck) {
+      const value = req.params[field];
+      if (value !== undefined && value !== null) {
+        if (!mongoose.Types.ObjectId.isValid(value.toString())) {
+          return res.status(400).json({ success: false, error: `ID inválido: ${field}` });
+        }
       }
     }
-  }
 
-  next();
-}
+    // Verificar em req.body (pode ser undefined em GET, etc.)
+    if (req.body && typeof req.body === 'object') {
+      for (const field of fieldsToCheck) {
+        const value = req.body[field];
+        if (value !== undefined && value !== null && typeof value === 'string') {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            return res.status(400).json({ success: false, error: `ID inválido: ${field}` });
+          }
+        }
+      }
+    }
+
+    next();
+  };
+};
 
 module.exports = validateObjectId;

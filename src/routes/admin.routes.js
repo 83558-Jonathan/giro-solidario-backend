@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const authMiddleware = require('../middleware/authMiddleware');
+const validateObjectId = require('../middleware/validateObjectId');
 
-// Middleware de admin simples
 const adminOnly = (req, res, next) => {
   if (req.usuario && req.usuario.role === 'admin') {
     next();
@@ -12,20 +12,14 @@ const adminOnly = (req, res, next) => {
   }
 };
 
-// Todas as rotas admin exigem autenticação
 router.use(authMiddleware);
 router.use(adminOnly);
 
-// Estatísticas
 router.get('/estatisticas', adminController.getEstatisticas);
-
-// Saques
 router.get('/saques/pendentes', adminController.getSaquesPendentes);
 router.get('/saques', adminController.getTodosSaques);
-router.post('/saques/:id/aprovar', adminController.aprovarSaque);
-router.post('/saques/:id/recusar', adminController.recusarSaque);
-
-// Rodadas (detalhadas para admin)
-router.get('/rodadas/:id', adminController.getRodadaDetalhes);
+router.post('/saques/:id/aprovar', validateObjectId(['id']), adminController.aprovarSaque);
+router.post('/saques/:id/recusar', validateObjectId(['id']), adminController.recusarSaque);
+router.get('/rodadas/:id', validateObjectId(['id']), adminController.getRodadaDetalhes);
 
 module.exports = router;

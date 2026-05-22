@@ -8,7 +8,7 @@ const ChatMessage = require('../models/ChatMessage')
 // VARIÁVEL GLOBAL PARA O SOCKET.IO
 // ===========================================
 let io = null
-let rodadaServiceInstance = null // para injeção de dependência
+let rodadaServiceInstance = null
 
 function initializeIo (socketIo) {
   io = socketIo
@@ -152,7 +152,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     rodada.totalDepositosConfirmados = pagos.length
     await rodada.save()
 
-    // Se o usuário estava na fila, remover os campos (pagou, então não precisa mais)
     const usuario = await User.findById(transacao.pagador)
     if (usuario && usuario.aguardandoVermelho) {
       usuario.aguardandoVermelho = false
@@ -185,7 +184,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
             `❌ [${source}] RodadaService não injetado! Não foi possível avançar a rodada.`
           )
         }
-
         if (io) {
           io.to(`rodada-${rodada._id}`).emit('rodada-atualizada', {
             rodadaId: rodada._id,
@@ -245,10 +243,12 @@ const criarCobrancaPix = async (req, res) => {
         .status(400)
         .json({ success: false, error: 'Esta transação já foi paga' })
     if (transacao.status === 'cancelada_expirada')
-      return res.status(400).json({
-        success: false,
-        error: 'Transação expirada. Não é possível gerar novo PIX.'
-      })
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: 'Transação expirada. Não é possível gerar novo PIX.'
+        })
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -313,11 +313,13 @@ const criarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao criar QR Code PIX:', error)
-    res.status(500).json({
-      success: false,
-      error:
-        error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
-    })
+    res
+      .status(500)
+      .json({
+        success: false,
+        error:
+          error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
+      })
   }
 }
 
@@ -376,7 +378,6 @@ const verificarStatus = async (req, res) => {
       (transacaoAtualizada.metadata?.expiraEm &&
         new Date() > new Date(transacaoAtualizada.metadata.expiraEm)) ||
       transacaoAtualizada.status === 'cancelada_expirada'
-
     res.json({
       success: true,
       status: transacaoAtualizada.status,
@@ -409,23 +410,25 @@ const renovarCobrancaPix = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, error: 'Transação não encontrada' })
-    if (transacao.status !== 'pendente') {
-      return res.status(400).json({
-        success: false,
-        error: 'Não é possível renovar esta cobrança – status inválido'
-      })
-    }
+    if (transacao.status !== 'pendente')
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: 'Não é possível renovar esta cobrança – status inválido'
+        })
 
     const aindaNaRodada = await Rodada.findOne({
       'participantes.usuario': transacao.pagador._id,
       'participantes.transacaoId': transacaoId
     })
-    if (!aindaNaRodada) {
-      return res.status(400).json({
-        success: false,
-        error: 'Você não está mais na rodada. Renovação não permitida.'
-      })
-    }
+    if (!aindaNaRodada)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: 'Você não está mais na rodada. Renovação não permitida.'
+        })
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -477,17 +480,18 @@ const renovarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao renovar PIX:', error)
-    res.status(500).json({
-      success: false,
-      error:
-        error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
-    })
+    res
+      .status(500)
+      .json({
+        success: false,
+        error:
+          error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
+      })
   }
 }
 
 // ===========================================
-// CANCELAR EXPIRADO (chamado pelo frontend)
-// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
+// CANCELAR EXPIRADO (DELETA USUÁRIO)
 // ===========================================
 const cancelarExpirado = async (req, res) => {
   const { transacaoId } = req.body
@@ -508,17 +512,15 @@ const cancelarExpirado = async (req, res) => {
       'participantes.usuario': usuarioId,
       'participantes.cor': 'vermelho'
     })
-
     if (!rodada) {
       console.log(
         `[CANCELAR-EXPIRADO] Rodada não encontrada para transacao ${transacaoId}`
       )
-      if (transacao.status === 'cancelada_expirada') {
+      if (transacao.status === 'cancelada_expirada')
         return res.json({
           success: true,
           message: 'Participante já havia sido removido'
         })
-      }
       return res.status(404).json({ error: 'Rodada não encontrada' })
     }
 
@@ -540,15 +542,12 @@ const cancelarExpirado = async (req, res) => {
       }
     )
 
-    if (updateResult.modifiedCount === 0) {
-      console.log(
-        `[CANCELAR-EXPIRADO] Nenhum documento alterado. Possivelmente já removido.`
-      )
-    } else {
+    if (updateResult.modifiedCount === 0)
+      console.log(`[CANCELAR-EXPIRADO] Nenhum documento alterado.`)
+    else
       console.log(
         `[CANCELAR-EXPIRADO] Participante removido da rodada via $pull.`
       )
-    }
 
     const rodadaAtualizada = await Rodada.findById(rodada._id)
     const vermelhosRestantes = rodadaAtualizada.participantes.filter(
@@ -565,7 +564,6 @@ const cancelarExpirado = async (req, res) => {
       await transacao.save()
     }
 
-    // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO EM VEZ DE COLOCAR NA FILA
     const usuario = await User.findById(usuarioId)
     if (usuario) {
       await User.deleteOne({ _id: usuarioId })
@@ -586,7 +584,6 @@ const cancelarExpirado = async (req, res) => {
 
 // ===========================================
 // PROCESSAR TRANSAÇÕES EXPIRADAS (JOB)
-// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
 // ===========================================
 async function processarTransacoesExpiradas () {
   const agora = new Date()
@@ -605,7 +602,6 @@ async function processarTransacoesExpiradas () {
         'participantes.cor': 'vermelho',
         'participantes.transacaoId': transacao._id
       })
-
       if (!rodada) {
         console.log(
           `[JOB] Transação ${transacao._id} expirada, mas usuário não está mais na rodada. Cancelando transação.`
@@ -615,7 +611,6 @@ async function processarTransacoesExpiradas () {
         continue
       }
 
-      // Remove o participante da rodada
       rodada.participantes = rodada.participantes.filter(
         p => p.transacaoId !== transacao._id
       )
@@ -639,7 +634,6 @@ async function processarTransacoesExpiradas () {
       transacao.status = 'cancelada_expirada'
       await transacao.save()
 
-      // 🔥 ALTERAÇÃO: DELETAR O USUÁRIO (não colocar na fila)
       const usuario = await User.findById(usuarioId)
       if (usuario) {
         await User.deleteOne({ _id: usuarioId })
@@ -648,13 +642,12 @@ async function processarTransacoesExpiradas () {
         )
       }
 
-      if (io) {
+      if (io)
         io.to(`rodada-${rodada._id}`).emit('usuario-removido', {
           usuarioId: usuarioId,
           rodadaId: rodada._id,
           motivo: 'expirado'
         })
-      }
     } catch (err) {
       console.error(`[JOB] Erro ao processar expiração ${transacao._id}:`, err)
     }
@@ -662,8 +655,7 @@ async function processarTransacoesExpiradas () {
 }
 
 // ===========================================
-// REMOVER VERMELHOS INADIMPLENTES (JOB DIÁRIO - 24h)
-// AGORA DELETA O USUÁRIO EM VEZ DE COLOCAR NA FILA
+// REMOVER VERMELHOS INADIMPLENTES (JOB HORÁRIO)
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
@@ -677,55 +669,30 @@ async function removerVermelhosInadimplentes () {
   const rodadas = await Rodada.find({
     status: { $in: ['aguardando', 'em_andamento'] }
   }).lean()
-
   let totalRemovidos = 0
 
   for (const rodada of rodadas) {
-    // Filtra participantes vermelhos que ainda não pagaram
     const vermelhosNaoPagos = rodada.participantes.filter(
       p => p.cor === 'vermelho' && p.depositoConfirmado === false
     )
-
     if (vermelhosNaoPagos.length === 0) continue
 
-    // Coleta todos os IDs de transação (podem existir nulos)
     const transacaoIds = vermelhosNaoPagos
       .map(p => p.transacaoId)
       .filter(id => id)
-
-    // Busca as transações correspondentes em lote
     const transacoes = await Transacao.find({
       _id: { $in: transacaoIds }
     }).select('_id metadata.status')
-
     const mapTransacao = new Map()
     transacoes.forEach(t => mapTransacao.set(t._id.toString(), t))
 
-    // Identifica quais participantes devem ser removidos
     const participantesParaRemover = vermelhosNaoPagos.filter(p => {
-      // Caso 1: não tem transação associada -> usa dataEntrada
-      if (!p.transacaoId) {
-        const tempoDecorrido = agora - new Date(p.dataEntrada)
-        return tempoDecorrido >= UMA_HORA_MS
-      }
-
+      if (!p.transacaoId) return agora - new Date(p.dataEntrada) >= UMA_HORA_MS
       const transacao = mapTransacao.get(p.transacaoId.toString())
-      // Caso 2: transação não encontrada -> usa dataEntrada
-      if (!transacao) {
-        const tempoDecorrido = agora - new Date(p.dataEntrada)
-        return tempoDecorrido >= UMA_HORA_MS
-      }
-
-      // Caso 3: transação existe -> verifica expiraEm ou dataEntrada como fallback
+      if (!transacao) return agora - new Date(p.dataEntrada) >= UMA_HORA_MS
       const expiraEm = transacao.metadata?.expiraEm
-      if (expiraEm) {
-        // Já tem data de expiração do PIX (1 hora a partir da criação)
-        return new Date(expiraEm) < agora
-      } else {
-        // Fallback: usa dataEntrada
-        const tempoDecorrido = agora - new Date(p.dataEntrada)
-        return tempoDecorrido >= UMA_HORA_MS
-      }
+      if (expiraEm) return new Date(expiraEm) < agora
+      else return agora - new Date(p.dataEntrada) >= UMA_HORA_MS
     })
 
     if (participantesParaRemover.length === 0) continue
@@ -733,14 +700,12 @@ async function removerVermelhosInadimplentes () {
     console.log(
       `   Rodada ${rodada.nome} (${rodada._id}): ${participantesParaRemover.length} vermelho(s) inadimplente(s) por tempo.`
     )
-
     let modificado = false
 
     for (const p of participantesParaRemover) {
       const usuarioId = p.usuario.toString()
       const transacaoId = p.transacaoId
 
-      // 1. Remove o participante da rodada (todos os arrays)
       await Rodada.updateOne(
         { _id: rodada._id },
         {
@@ -753,30 +718,17 @@ async function removerVermelhosInadimplentes () {
           $unset: { verde: usuarioId }
         }
       )
-
-      // 2. Cancela a transação se existir
-      if (transacaoId) {
+      if (transacaoId)
         await Transacao.updateOne(
           { _id: transacaoId },
           { $set: { status: 'cancelada_expirada' } }
         )
-        console.log(`      Transação ${transacaoId} cancelada.`)
-      }
-
-      // 3. Deleta o usuário (conforme regra de negócio)
       const usuario = await User.findById(usuarioId)
-      if (usuario) {
-        await User.deleteOne({ _id: usuarioId })
-        console.log(
-          `      🗑️ Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência.`
-        )
-      }
-
+      if (usuario) await User.deleteOne({ _id: usuarioId })
       totalRemovidos++
       modificado = true
     }
 
-    // 4. Atualiza o contador de depósitos confirmados na rodada
     if (modificado) {
       const rodadaAtualizada = await Rodada.findById(rodada._id)
       const vermelhosRestantes = rodadaAtualizada.participantes.filter(
@@ -795,9 +747,6 @@ async function removerVermelhosInadimplentes () {
   )
 }
 
-// ===========================================
-// EXPORTAÇÕES
-// ===========================================
 module.exports = {
   criarCobrancaPix,
   verificarStatus,

@@ -1,27 +1,24 @@
-const express = require('express')
-const router = express.Router()
+const express = require('express');
+const router = express.Router();
 const {
   registrar,
   login,
   getMe,
   forgotPassword,
   resetPassword
-} = require('../controllers/authController')
-const authMiddleware = require('../middleware/authMiddleware')
+} = require('../controllers/authController');
+const authMiddleware = require('../middleware/authMiddleware');
 const {
   validateRegister,
   validateLogin,
   validateForgotPassword,
   validateResetPassword
-} = require('../middleware/validation')
+} = require('../middleware/validation');
 
-// Rotas publicas
-router.post('/registrar', validateRegister, registrar)
-router.post('/login', validateLogin, login)
-router.post('/forgot-password', validateForgotPassword, forgotPassword)
-router.post('/reset-password', validateResetPassword, resetPassword)
+router.post('/registrar', validateRegister, registrar);
+router.post('/login', validateLogin, login);
+router.post('/forgot-password', validateForgotPassword, forgotPassword);
+router.post('/reset-password', validateResetPassword, resetPassword);
+router.get('/me', authMiddleware, getMe);
 
-// Rotas privadas
-router.get('/me', authMiddleware, getMe)
-
-module.exports = router
+module.exports = router;

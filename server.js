@@ -35,11 +35,6 @@ const expiraPixJob = require('./src/jobs/expiraPix')
 // ===========================================
 // JOBS E CRON
 // ===========================================
-// cron.schedule('* * * * *', () => {
-//   console.log('⏰ [CRON] Executando job de expiração de PIX...')
-//   processarTransacoesExpiradas().catch(err => console.error('Erro no job:', err))
-// })
-
 cron.schedule('0 * * * *', () => {
   console.log(
     '⏰ [CRON-HORARIO] Executando limpeza de vermelhos inadimplentes...'
@@ -122,6 +117,32 @@ const getRealIp = req => {
 }
 
 // ===========================================
+// MIDDLEWARE DE LOG MELHORADO (antes de qualquer processamento)
+// ===========================================
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const logObj = {
+      method: req.method,
+      path: req.path,
+      ip: getRealIp(req),
+      hasBody: !!req.body,
+      contentType: req.headers['content-type']
+    }
+    // Evita poluir o console com OPTIONS
+    if (req.method === 'OPTIONS') {
+      console.log(`🔍 [OPTIONS] ${req.path} - IP: ${logObj.ip}`)
+    } else {
+      console.log(
+        `📥 [${req.method}] ${req.path} - IP: ${logObj.ip} | hasBody: ${logObj.hasBody} | Content-Type: ${logObj.contentType}`
+      )
+    }
+    next()
+  })
+} else {
+  app.use((req, res, next) => next())
+}
+
+// ===========================================
 // CONFIGURAÇÕES DE SEGURANÇA (HELMET, COMPRESSION, TIMEOUT)
 // ===========================================
 app.use(
@@ -131,11 +152,14 @@ app.use(
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'https:']
+        scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'", 'https://api.abacatepay.com']
       }
     },
-    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true }
+    frameguard: { action: 'deny' },
+    dnsPrefetchControl: { allow: false },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
   })
 )
 app.use(compression())
@@ -148,75 +172,8 @@ app.use((req, res, next) => {
   next()
 })
 
-// Log opcional (cuidado em produção com dados sensíveis)
-app.use((req, res, next) => {
-  console.log(`[${req.method}] ${req.path} - IP: ${getRealIp(req)}`)
-  next()
-})
-
 // ===========================================
-// RATE LIMITING (proteção contra DDoS e brute force)
-// ===========================================
-const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 500,
-  message: {
-    success: false,
-    error: 'Muitas requisições. Tente novamente mais tarde.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-})
-
-const loginLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 100,
-  skipSuccessfulRequests: true,
-  message: {
-    success: false,
-    error: 'Muitas tentativas de login. Tente novamente em 5 minutos.'
-  }
-})
-
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 100,
-  message: {
-    success: false,
-    error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
-  }
-})
-
-const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 50,
-  message: {
-    success: false,
-    error: 'Muitas solicitações. Tente novamente em 1 hora.'
-  }
-})
-
-const webhookLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 200,
-  message: { success: false, error: 'Muitas requisições para o webhook.' },
-  skip: req => {
-    const trustedIps = process.env.TRUSTED_IPS
-      ? process.env.TRUSTED_IPS.split(',')
-      : []
-    return trustedIps.includes(getRealIp(req))
-  }
-})
-
-// 🛡️ SEGURANÇA: Rate limit específico para histórico do chat (evita scraping)
-const chatHistoryLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 30,
-  message: { error: 'Muitas requisições ao histórico. Aguarde um momento.' }
-})
-
-// ===========================================
-// MIDDLEWARE PADRÃO
+// CORS (deve vir antes dos parsers para OPTIONS)
 // ===========================================
 const allowedOrigins = [
   'https://giropremiados.com.br',
@@ -224,12 +181,13 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5001'
 ]
+
 app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true)
       if (allowedOrigins.includes(origin)) return callback(null, true)
-      console.log(`CORS bloqueado para origem: ${origin}`)
+      console.log(`❌ CORS bloqueado para origem: ${origin}`)
       callback(new Error('Not allowed by CORS'))
     },
     credentials: true,
@@ -242,8 +200,194 @@ app.use(
     ]
   })
 )
+
+// ===========================================
+// PARSERS DE BODY (necessários antes de qualquer middleware que use req.body)
+// ===========================================
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// ===========================================
+// 🛡️ SANITIZAÇÃO MANUAL (agora com verificação segura)
+// ===========================================
+
+// 1. Remove operadores $ (NoSQL injection) – seguro para req.body undefined
+app.use((req, res, next) => {
+  const sanitizeObject = obj => {
+    if (!obj || typeof obj !== 'object') return
+    for (let key in obj) {
+      if (key.startsWith('$')) delete obj[key]
+      else if (typeof obj[key] === 'object') sanitizeObject(obj[key])
+    }
+  }
+  if (req.body) sanitizeObject(req.body)
+  if (req.query) sanitizeObject(req.query)
+  next()
+})
+
+// 2. Sanitização de strings específicas (XSS básico)
+const sanitizeString = str => {
+  if (!str || typeof str !== 'string') return str
+  return str.replace(/[<>]/g, '').trim()
+}
+
+app.use((req, res, next) => {
+  const fieldsToSanitize = [
+    'nome',
+    'email',
+    'telefone',
+    'cpf',
+    'chavePix',
+    'codigoConvite',
+    'mensagem',
+    'motivo'
+  ]
+  // Só processa se o body existir (evita erro em OPTIONS)
+  if (req.body) {
+    for (const field of fieldsToSanitize) {
+      if (req.body[field]) req.body[field] = sanitizeString(req.body[field])
+    }
+  }
+  if (req.query) {
+    for (const field of fieldsToSanitize) {
+      if (req.query[field]) req.query[field] = sanitizeString(req.query[field])
+    }
+  }
+  next()
+})
+
+// 3. Proteção contra parameter pollution (objetos muito aninhados)
+app.use((req, res, next) => {
+  const checkDepth = (obj, depth = 0) => {
+    if (depth > 5) throw new Error('Objeto muito aninhado')
+    for (let key in obj) {
+      if (typeof obj[key] === 'object' && obj[key] !== null)
+        checkDepth(obj[key], depth + 1)
+    }
+  }
+  try {
+    if (req.body && typeof req.body === 'object') checkDepth(req.body)
+    next()
+  } catch (err) {
+    console.error(
+      `❌ Parameter pollution detectado em ${req.path}:`,
+      err.message
+    )
+    return res.status(400).json({ error: 'Requisição malformada' })
+  }
+})
+
+// 4. Desabilitar métodos HTTP não utilizados
+app.use((req, res, next) => {
+  const allowedMethods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  if (!allowedMethods.includes(req.method)) {
+    return res.status(405).send('Method Not Allowed')
+  }
+  next()
+})
+
+// 5. Bloqueio de acesso a arquivos sensíveis
+app.use((req, res, next) => {
+  if (req.path.match(/\.(env|git|log|sql|bak|config|key|pem)$/)) {
+    console.warn(
+      `⚠️ Tentativa de acesso a arquivo sensível: ${req.path} - IP: ${getRealIp(
+        req
+      )}`
+    )
+    return res.status(403).send('Acesso negado')
+  }
+  next()
+})
+
+// ===========================================
+// RATE LIMITING (proteção contra DDoS e brute force)
+// ===========================================
+const globalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 1500, // triplicado (antes 500)
+  message: {
+    success: false,
+    error: 'Muitas requisições. Tente novamente mais tarde.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+})
+
+const loginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300, // triplicado (antes 100)
+  skipSuccessfulRequests: true,
+  message: {
+    success: false,
+    error: 'Muitas tentativas de login. Tente novamente em 5 minutos.'
+  }
+})
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 300, // triplicado (antes 100)
+  message: {
+    success: false,
+    error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
+  }
+})
+
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 150, // triplicado (antes 50)
+  message: {
+    success: false,
+    error: 'Muitas solicitações. Tente novamente em 1 hora.'
+  }
+})
+
+const webhookLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 600, // triplicado (antes 200)
+  message: { success: false, error: 'Muitas requisições para o webhook.' },
+  skip: req => {
+    const trustedIps = process.env.TRUSTED_IPS
+      ? process.env.TRUSTED_IPS.split(',')
+      : []
+    return trustedIps.includes(getRealIp(req))
+  }
+})
+
+const chatHistoryLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 90, // triplicado (antes 30)
+  message: { error: 'Muitas requisições ao histórico. Aguarde um momento.' }
+})
+
+const mandalaLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 90, // triplicado (antes 30)
+  message: { error: 'Muitas requisições à mandala. Aguarde um momento.' }
+})
+
+const rodadasListLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 60, // triplicado (antes 20)
+  message: { error: 'Muitas requisições. Aguarde um pouco.' }
+})
+
+const usersListLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 60, // triplicado (antes 20)
+  message: { error: 'Muitas requisições. Aguarde um pouco.' }
+})
+
+const saqueLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15, // triplicado (antes 5)
+  message: { error: 'Muitas solicitações de saque. Tente mais tarde.' }
+})
+
+const jogarNovamenteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 9, // triplicado (antes 3)
+  message: { error: 'Muitas tentativas de reentrada. Aguarde.' }
+})
 
 // Aplicar rate limiters
 app.use('/api/', globalLimiter)
@@ -251,6 +395,22 @@ app.use('/api/auth/login', loginLimiter)
 app.use('/api/auth/registrar', registerLimiter)
 app.use('/api/auth/forgot-password', forgotPasswordLimiter)
 app.use('/api/webhook/', webhookLimiter)
+app.use('/api/rodadas', rodadasListLimiter)
+app.use('/api/users', usersListLimiter)
+app.use('/api/rodadas/:rodadaId/sacar-premio', saqueLimiter)
+app.use('/api/rodadas/jogar-novamente', jogarNovamenteLimiter)
+
+// Log de tentativas de acesso admin
+app.use('/api/admin', (req, res, next) => {
+  if (req.usuario?.role !== 'admin') {
+    console.warn(
+      `⚠️ Tentativa de acesso admin por ${getRealIp(req)} - usuário: ${
+        req.usuario?.id || 'não autenticado'
+      }`
+    )
+  }
+  next()
+})
 
 // ===========================================
 // CONEXÃO MONGODB
@@ -267,11 +427,9 @@ mongoose
     console.log('✅ MongoDB Conectado')
     await criarAdmin().catch(err => console.error('Erro ao criar admin:', err))
 
-    // Iniciar job de expiração PIX
     expiraPixJob
     console.log('⏰ Job de expiração PIX agendado')
 
-    // Alocação inicial da fila
     setTimeout(async () => {
       try {
         console.log(`\n[STARTUP] Executando alocação inicial da fila...`)
@@ -284,7 +442,7 @@ mongoose
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
 
 // ===========================================
-// SOCKET.IO (CHAT) – CORREÇÕES DE SEGURANÇA
+// SOCKET.IO (CHAT) – CORREÇÃO ROBUSTA
 // ===========================================
 const io = socketIo(server, {
   cors: {
@@ -299,43 +457,62 @@ const pixController = require('./src/controllers/pixController')
 pixController.initializeIo(io)
 RodadaService.initializeIo(io)
 
-// Middleware de autenticação para socket
+// Middleware de autenticação – COM TRATAMENTO DE ERRO SEGURO
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token
-  if (!token) return next(new Error('Autenticação necessária'))
+  if (!token) {
+    console.log(
+      `❌ Socket rejeitado: token ausente (IP: ${socket.handshake.address})`
+    )
+    return next(new Error('Autenticação necessária'))
+  }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    // 🛡️ SEGURANÇA: Adicionar campo 'role' para verificação de admin
     const usuario = await require('./src/models/User')
       .findById(decoded.id)
-      .select('id nome email role') // 🔧 INCLUI role
-    if (!usuario) return next(new Error('Usuário não encontrado'))
+      .select('id nome email role')
+    if (!usuario) {
+      console.log(
+        `❌ Socket rejeitado: usuário não encontrado (ID: ${decoded.id})`
+      )
+      return next(new Error('Usuário não encontrado'))
+    }
     socket.usuario = usuario
     next()
   } catch (err) {
-    return next(new Error('Token inválido'))
+    console.log(`❌ Socket rejeitado: token inválido - ${err.message}`)
+    next(new Error('Token inválido'))
   }
 })
 
+// Rate limiting por socket (evita flooding)
+const socketRateLimit = new Map()
+
 io.on('connection', socket => {
+  if (!socket.usuario) {
+    console.log(`⚠️ Socket sem autenticação (${socket.id}) – desconectando`)
+    if (socket.connected) socket.disconnect(true)
+    return
+  }
+
   console.log(`🟢 Usuário conectado: ${socket.usuario.nome} (${socket.id})`)
 
-  // Entrar na sala da rodada
   socket.on('entrar-sala', async rodadaId => {
+    if (!socket.usuario) {
+      socket.emit('erro', 'Sessão inválida. Recarregue a página.')
+      return
+    }
     try {
-      // 🔧 CORREÇÃO: Validar ObjectId ANTES de consultar o banco
       if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
         socket.emit('erro', 'ID de rodada inválido')
         return
       }
-
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
         socket.emit('erro', 'Rodada não encontrada')
         return
       }
-
       const isParticipante = rodada.participantes.some(
         p => p.usuario.toString() === socket.usuario.id
       )
@@ -343,7 +520,6 @@ io.on('connection', socket => {
         socket.emit('erro', 'Você não tem permissão para entrar neste chat')
         return
       }
-
       socket.join(`rodada-${rodadaId}`)
       console.log(
         `📌 ${socket.usuario.nome} entrou na sala da rodada ${rodadaId}`
@@ -354,24 +530,32 @@ io.on('connection', socket => {
     }
   })
 
-  // Sair da sala
   socket.on('sair-sala', rodadaId => {
+    if (!socket.usuario) return
     socket.leave(`rodada-${rodadaId}`)
     console.log(`🔴 ${socket.usuario.nome} saiu da sala da rodada ${rodadaId}`)
   })
 
-  // 🛡️ Receber nova mensagem (COM VALIDAÇÕES COMPLETAS)
   socket.on('nova-mensagem', async data => {
+    if (!socket.usuario) {
+      socket.emit('erro', 'Sessão inválida. Recarregue a página.')
+      return
+    }
     try {
-      const { rodadaId, mensagem } = data
+      const now = Date.now()
+      const last = socketRateLimit.get(socket.id)
+      if (last && now - last < 1000) {
+        socket.emit('erro', 'Muitas mensagens. Aguarde um pouco.')
+        return
+      }
+      socketRateLimit.set(socket.id, now)
 
+      const { rodadaId, mensagem } = data
       if (!mensagem || mensagem.trim().length === 0) return
       if (mensagem.length > 500) {
         socket.emit('erro', 'Mensagem muito longa (máximo 500 caracteres)')
         return
       }
-
-      // ✅ CORREÇÃO: usar mongoose.Types.ObjectId
       if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
         socket.emit('erro', 'ID de rodada inválido')
         return
@@ -382,7 +566,6 @@ io.on('connection', socket => {
         socket.emit('erro', 'Rodada não encontrada')
         return
       }
-
       const isParticipante = rodada.participantes.some(
         p => p.usuario.toString() === socket.usuario.id
       )
@@ -394,13 +577,12 @@ io.on('connection', socket => {
       const mensagemSanitizada = escapeHtml(mensagem.trim())
       const nomeSanitizado = escapeHtml(socket.usuario.nome)
 
-      // ✅ FORÇA o tipo correto (ignora o que o front-end enviar)
       const novaMsg = new ChatMessage({
         rodadaId,
         usuarioId: socket.usuario.id,
         nome: nomeSanitizado,
         mensagem: mensagemSanitizada,
-        tipo: 'usuario', // <-- fixo, nunca 'texto'
+        tipo: 'usuario',
         createdAt: new Date()
       })
       await novaMsg.save()
@@ -419,12 +601,13 @@ io.on('connection', socket => {
     }
   })
 
-  // 🛡️ Mensagem do sistema (apenas admin) – COM VERIFICAÇÃO DE ROLE
   socket.on('mensagem-sistema', async data => {
+    if (!socket.usuario) {
+      socket.emit('erro', 'Sessão inválida. Recarregue a página.')
+      return
+    }
     const { rodadaId, mensagem, acao } = data
     if (!rodadaId || !mensagem) return
-
-    // 🔧 CORREÇÃO: Verifica se o usuário tem role 'admin'
     if (socket.usuario.role !== 'admin') {
       socket.emit(
         'erro',
@@ -432,21 +615,17 @@ io.on('connection', socket => {
       )
       return
     }
-
     if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
       socket.emit('erro', 'ID de rodada inválido')
       return
     }
-
     try {
       const rodada = await Rodada.findById(rodadaId)
       if (!rodada) {
         socket.emit('erro', 'Rodada não encontrada')
         return
       }
-
       const mensagemSanitizada = escapeHtml(mensagem.trim())
-
       const novaMsg = new ChatMessage({
         rodadaId,
         mensagem: mensagemSanitizada,
@@ -455,7 +634,6 @@ io.on('connection', socket => {
         createdAt: new Date()
       })
       await novaMsg.save()
-
       io.to(`rodada-${rodadaId}`).emit('mensagem', {
         _id: novaMsg._id,
         mensagem: novaMsg.mensagem,
@@ -470,14 +648,19 @@ io.on('connection', socket => {
   })
 
   socket.on('disconnect', () => {
-    console.log(
-      `🔴 Usuário desconectado: ${socket.usuario.nome} (${socket.id})`
-    )
+    if (socket.usuario) {
+      console.log(
+        `🔴 Usuário desconectado: ${socket.usuario.nome} (${socket.id})`
+      )
+    } else {
+      console.log(`🔴 Socket desconectado (sem autenticação): ${socket.id}`)
+    }
+    socketRateLimit.delete(socket.id)
   })
 })
 
 // ===========================================
-// ROTAS REST (com rate limit no histórico do chat)
+// ROTAS REST
 // ===========================================
 app.use('/api/auth', require('./src/routes/auth.routes'))
 app.use('/api/users', require('./src/routes/user.routes'))
@@ -490,9 +673,9 @@ app.use('/api/email', require('./src/routes/email.routes'))
 app.use('/api/admin', require('./src/routes/admin.routes'))
 app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'))
 
-// 🛡️ Aplica rate limit específico na rota de histórico do chat
 const chatRoutes = require('./src/routes/chat.routes')
 app.use('/api/chat', chatHistoryLimiter, chatRoutes)
+app.use('/api/rodadas/:rodadaId/mandala', mandalaLimiter)
 
 // ===========================================
 // ROTA DE TESTE E RAIZ
@@ -513,35 +696,45 @@ app.get('/', (req, res) => {
       rateLimit: 'Ativo (por IP real)',
       helmet: 'Ativo'
     },
-    endpoints: {
-      /* ... (mantenha o mesmo) ... */
-    }
+    endpoints: {}
   })
 })
 
 // 404
 app.use((req, res) => {
-  res.status(404).json({ error: 'Rota nao encontrada' })
+  res.status(404).json({ error: 'Rota não encontrada' })
 })
 
-// Error handler global
+// Error handler global (melhorado para capturar erros inesperados)
 app.use((err, req, res, next) => {
-  console.error('Erro:', err.stack)
-  if (err.timeout)
+  // Log detalhado do erro
+  console.error('❌ ERRO GLOBAL:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.url,
+    method: req.method,
+    ip: getRealIp(req),
+    body: req.body ? JSON.stringify(req.body).substring(0, 200) : undefined,
+    headers: req.headers ? { ...req.headers, authorization: '***' } : undefined
+  })
+
+  if (err.timeout) {
     return res
       .status(503)
       .json({ error: 'Tempo limite da requisição excedido' })
-  if (err.code === 'ERR_RATE_LIMIT')
+  }
+  if (err.code === 'ERR_RATE_LIMIT') {
     return res
       .status(429)
       .json({ error: 'Muitas requisições. Tente novamente mais tarde.' })
-  res.status(500).json({
-    error: 'Erro interno do servidor',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  })
+  }
+  const errorMsg =
+    process.env.NODE_ENV === 'development'
+      ? err.message
+      : 'Erro interno do servidor'
+  res.status(500).json({ error: errorMsg })
 })
 
-// Inicialização do servidor
 server.listen(PORT, () => {
   console.log(`
   🚀 Servidor rodando na porta ${PORT}

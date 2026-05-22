@@ -2,20 +2,13 @@ const express = require("express");
 const router = express.Router();
 const userController = require("../controllers/userController");
 const authMiddleware = require("../middleware/authMiddleware");
+const validateObjectId = require("../middleware/validateObjectId");
 
-// Todas as rotas de usuários requerem autenticação
 router.use(authMiddleware);
 
-// Listar todos os usuários
 router.get("/", userController.listarUsuarios);
-
-// Buscar usuário por ID
-router.get("/:id", userController.buscarUsuario);
-
-// Atualizar usuário
-router.put("/:id", userController.atualizarUsuario);
-
-// Listar indicados de um usuário
-router.get("/:id/indicados", userController.listarIndicados);
+router.get("/:id", validateObjectId(['id']), userController.buscarUsuario);
+router.put("/:id", validateObjectId(['id']), userController.atualizarUsuario);
+router.get("/:id/indicados", validateObjectId(['id']), userController.listarIndicados);
 
 module.exports = router;

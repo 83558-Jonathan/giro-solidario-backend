@@ -5,7 +5,6 @@ const mongoose = require('mongoose')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
 
-// CRIAR nova rodada
 exports.criarRodada = async (req, res) => {
   try {
     const rodada = await RodadaService.criarRodada(req.usuarioId)
@@ -16,29 +15,20 @@ exports.criarRodada = async (req, res) => {
   }
 }
 
-// LISTAR todas as rodadas - com verificação para cada rodada em andamento
 exports.listarRodadas = async (req, res) => {
   try {
     const db = mongoose.connection.db
-
-    // Buscar todas as rodadas em andamento e verificar se precisam avançar
     const rodadasEmAndamento = await db
       .collection('rodadas')
       .find({ status: 'em_andamento' })
       .toArray()
-
-    // Verificar cada rodada em andamento
-    for (const rodada of rodadasEmAndamento) {
+    for (const rodada of rodadasEmAndamento)
       await RodadaService.verificarEAvancarSeNecessario(rodada._id.toString())
-    }
-
-    // Buscar todas as rodadas atualizadas
     const rodadas = await db
       .collection('rodadas')
       .find({})
       .sort({ numero: -1 })
       .toArray()
-
     res.json({ success: true, count: rodadas.length, data: rodadas })
   } catch (error) {
     console.error('Erro ao listar rodadas:', error)
@@ -46,26 +36,16 @@ exports.listarRodadas = async (req, res) => {
   }
 }
 
-// BUSCAR rodada por ID
 exports.buscarRodadaPorId = async (req, res) => {
   try {
-    const { id } = req.params
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
-    }
-
     const db = mongoose.connection.db
-    const rodada = await db.collection('rodadas').findOne({
-      _id: new mongoose.Types.ObjectId(id)
-    })
-
-    if (!rodada) {
+    const rodada = await db
+      .collection('rodadas')
+      .findOne({ _id: new mongoose.Types.ObjectId(req.params.id) })
+    if (!rodada)
       return res
         .status(404)
         .json({ success: false, error: 'Rodada não encontrada' })
-    }
-
     res.json({ success: true, data: rodada })
   } catch (error) {
     console.error('Erro ao buscar rodada:', error)
@@ -73,46 +53,32 @@ exports.buscarRodadaPorId = async (req, res) => {
   }
 }
 
-// ===========================================
-// ADICIONAR PARTICIPANTE - CORRIGIDO COM SUPORTE A FILA
-// ===========================================
 exports.adicionarParticipante = async (req, res) => {
   try {
     const { rodadaId } = req.params
     const { usuarioId, indicadorId } = req.body
-
-    if (!usuarioId) {
+    if (!usuarioId)
       return res
         .status(400)
         .json({ success: false, error: 'usuarioId é obrigatório' })
-    }
-
-    // Buscar a rodada para saber seu status
     const db = mongoose.connection.db
-    const rodada = await db.collection('rodadas').findOne({
-      _id: new mongoose.Types.ObjectId(rodadaId)
-    })
-
-    if (!rodada) {
+    const rodada = await db
+      .collection('rodadas')
+      .findOne({ _id: new mongoose.Types.ObjectId(rodadaId) })
+    if (!rodada)
       return res
         .status(404)
         .json({ success: false, error: 'Rodada não encontrada' })
-    }
-
-    let rodadaAtualizada
-    let entrouNaFila = false
-
+    let rodadaAtualizada,
+      entrouNaFila = false
     try {
-      // Verificar status da rodada para decidir qual função chamar
-      if (rodada.status === 'aguardando') {
-        // Rodada ainda não iniciou → adicionar como amarelo
+      if (rodada.status === 'aguardando')
         rodadaAtualizada = await RodadaService.adicionarParticipanteAmarelo(
           rodadaId,
           usuarioId,
           indicadorId
         )
-      } else if (rodada.status === 'em_andamento') {
-        // Rodada já iniciou → tentar adicionar como vermelho
+      else if (rodada.status === 'em_andamento') {
         try {
           rodadaAtualizada = await RodadaService.adicionarParticipanteVermelho(
             rodadaId,
@@ -120,43 +86,37 @@ exports.adicionarParticipante = async (req, res) => {
             indicadorId
           )
         } catch (error) {
-          // Se não conseguiu adicionar como vermelho, pode ter entrado na fila
           if (
             error.message.includes('sem vagas') ||
             error.message.includes('aguardando')
           ) {
             entrouNaFila = true
-            // Verificar se o usuário foi marcado como aguardandoVermelho
             const usuario = await User.findById(usuarioId)
-            if (usuario?.aguardandoVermelho) {
+            if (usuario?.aguardandoVermelho)
               return res.json({
                 success: true,
                 message:
-                  'Não há vagas para vermelhos no momento. Você foi adicionado à fila de espera e será avisado quando houver vaga.',
+                  'Não há vagas para vermelhos no momento. Você foi adicionado à fila de espera.',
                 data: { aguardandoVermelho: true, fila: true }
               })
-            }
           }
           throw error
         }
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'Rodada já concluída. Não é possível adicionar participantes.'
-        })
-      }
+      } else
+        return res
+          .status(400)
+          .json({ success: false, error: 'Rodada já concluída.' })
     } catch (error) {
-      // Tratamento específico para usuário já em outra rodada
-      if (error.message.includes('já participa de uma rodada ativa')) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-          code: 'USUARIO_JA_EM_RODADA'
-        })
-      }
+      if (error.message.includes('já participa de uma rodada ativa'))
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: error.message,
+            code: 'USUARIO_JA_EM_RODADA'
+          })
       throw error
     }
-
     res.json({
       success: true,
       message: entrouNaFila
@@ -171,11 +131,9 @@ exports.adicionarParticipante = async (req, res) => {
   }
 }
 
-// INICIAR rodada (forçar início)
 exports.iniciarRodada = async (req, res) => {
   try {
-    const { rodadaId } = req.params
-    const rodada = await RodadaService.iniciarRodada(rodadaId)
+    const rodada = await RodadaService.iniciarRodada(req.params.rodadaId)
     res.json({ success: true, data: rodada })
   } catch (error) {
     console.error('Erro ao iniciar rodada:', error)
@@ -183,11 +141,9 @@ exports.iniciarRodada = async (req, res) => {
   }
 }
 
-// AVANÇAR rodada (forçar progressão)
 exports.avancarRodada = async (req, res) => {
   try {
-    const { rodadaId } = req.params
-    const rodada = await RodadaService.avancarRodada(rodadaId)
+    const rodada = await RodadaService.avancarRodada(req.params.rodadaId)
     res.json({ success: true, data: rodada })
   } catch (error) {
     console.error('Erro ao avançar rodada:', error)
@@ -195,20 +151,13 @@ exports.avancarRodada = async (req, res) => {
   }
 }
 
-// ===========================================
-// FORÇAR ALOCAÇÃO DA FILA (admin)
-// ===========================================
 exports.forcarAlocacaoFila = async (req, res) => {
   try {
-    // Verificar se é admin
     const user = await User.findById(req.usuarioId)
-    if (user.role !== 'admin') {
+    if (user.role !== 'admin')
       return res.status(403).json({ success: false, error: 'Acesso negado' })
-    }
-
     const alocados = await RodadaService.alocarFilaEmTodasRodadas()
     const restantes = await User.countDocuments({ aguardandoVermelho: true })
-
     res.json({
       success: true,
       message: `Alocação forçada concluída. ${alocados} usuários alocados.`,
@@ -221,39 +170,28 @@ exports.forcarAlocacaoFila = async (req, res) => {
   }
 }
 
-// ===========================================
-// VER MANDALA - COM GARANTIA DE TRANSAÇÃO PARA VERMELHOS
-// ===========================================
 exports.getMandala = async (req, res) => {
   try {
-    const { rodadaId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' });
-    }
-
-    // Usar o modelo Mongoose para poder salvar alterações
-    let rodada = await Rodada.findById(rodadaId);
-    if (!rodada) {
-      return res.status(404).json({ success: false, error: 'Rodada não encontrada' });
-    }
-
-    // ===========================================
-    // GARANTIR QUE VERMELHOS TENHAM transacaoId
-    // ===========================================
+    const { rodadaId } = req.params
+    if (!mongoose.Types.ObjectId.isValid(rodadaId))
+      return res.status(400).json({ success: false, error: 'ID inválido' })
+    let rodada = await Rodada.findById(rodadaId)
+    if (!rodada)
+      return res
+        .status(404)
+        .json({ success: false, error: 'Rodada não encontrada' })
     const podeTerTransacao =
       rodada.status === 'em_andamento' ||
-      (rodada.status === 'aguardando' && rodada.verde);
-
+      (rodada.status === 'aguardando' && rodada.verde)
     if (podeTerTransacao && rodada.verde) {
-      let modificado = false;
+      let modificado = false
       for (const participante of rodada.participantes) {
         if (participante.cor === 'vermelho' && !participante.transacaoId) {
           let transacao = await Transacao.findOne({
             pagador: participante.usuario,
             rodada: rodada._id,
             status: 'pendente'
-          });
+          })
           if (!transacao) {
             transacao = new Transacao({
               tipo: 'deposito',
@@ -262,44 +200,41 @@ exports.getMandala = async (req, res) => {
               valor: 150,
               rodada: rodada._id,
               status: 'pendente'
-            });
-            await transacao.save();
-            console.log(`[getMandala] ✅ Transação criada para vermelho ${participante.usuario}`);
-          } else {
-            console.log(`[getMandala] ♻️ Transação existente reaproveitada: ${transacao._id}`);
+            })
+            await transacao.save()
           }
-          participante.transacaoId = transacao._id;
-          modificado = true;
+          participante.transacaoId = transacao._id
+          modificado = true
         }
       }
       if (modificado) {
-        rodada.vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho').map(p => p.usuario);
-        await rodada.save();
-        console.log(`[getMandala] 🔄 Rodada ${rodada.nome} atualizada com transações para vermelhos`);
+        rodada.vermelhos = rodada.participantes
+          .filter(p => p.cor === 'vermelho')
+          .map(p => p.usuario)
+        await rodada.save()
       }
     }
-
-    // ===========================================
-    // RECONSTRUIR ARRAYS DE CORES (consistência)
-    // ===========================================
-    const participantes = rodada.participantes || [];
-    rodada.vermelhos = participantes.filter(p => p.cor === 'vermelho').map(p => p.usuario);
-    rodada.azuis    = participantes.filter(p => p.cor === 'azul').map(p => p.usuario);
-    rodada.pretos   = participantes.filter(p => p.cor === 'preto').map(p => p.usuario);
-    rodada.verde    = participantes.find(p => p.cor === 'verde')?.usuario || null;
-
-    // Buscar nomes dos usuários (usando o modelo User)
-    const UserModel = require('../models/User');
-    const participantesComNomes = [];
+    rodada.vermelhos = rodada.participantes
+      .filter(p => p.cor === 'vermelho')
+      .map(p => p.usuario)
+    rodada.azuis = rodada.participantes
+      .filter(p => p.cor === 'azul')
+      .map(p => p.usuario)
+    rodada.pretos = rodada.participantes
+      .filter(p => p.cor === 'preto')
+      .map(p => p.usuario)
+    rodada.verde =
+      rodada.participantes.find(p => p.cor === 'verde')?.usuario || null
+    const UserModel = require('../models/User')
+    const participantesComNomes = []
     for (const p of rodada.participantes) {
-      const user = await UserModel.findById(p.usuario).select('nome email');
+      const user = await UserModel.findById(p.usuario).select('nome email')
       participantesComNomes.push({
         ...p.toObject(),
         nome: user?.nome || 'Desconhecido',
         email: user?.email || ''
-      });
+      })
     }
-
     const mandala = {
       ...rodada.toObject(),
       participantes: participantesComNomes,
@@ -307,16 +242,14 @@ exports.getMandala = async (req, res) => {
       pretos: rodada.pretos,
       vermelhos: rodada.vermelhos,
       verde: rodada.verde
-    };
-
-    res.json({ success: true, data: mandala });
+    }
+    res.json({ success: true, data: mandala })
   } catch (error) {
-    console.error('❌ Erro ao carregar mandala:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Erro ao carregar mandala:', error)
+    res.status(500).json({ success: false, error: error.message })
   }
-};
+}
 
-// VERIFICAR STATUS do usuário
 exports.verificarStatusUsuario = async (req, res) => {
   try {
     const status = await RodadaService.verificarStatusUsuario(req.usuarioId)
@@ -327,138 +260,79 @@ exports.verificarStatusUsuario = async (req, res) => {
   }
 }
 
-// ===========================================
-// JOGAR NOVAMENTE (usuario que ganhou quer voltar)
-// ===========================================
 exports.jogarNovamente = async (req, res) => {
   try {
-    const usuarioId = req.usuarioId
-    const result = await RodadaService.jogarNovamente(usuarioId)
-
-    // Retornar os dados diretamente no nível principal para o frontend
-    const response = {
-      success: true,
-      message: result.message,
-      data: result
-    }
-
-    // Se houver propriedades específicas, promover para o nível principal
-    if (result.cor) {
-      response.cor = result.cor
-    }
-    if (result.aguardando !== undefined) {
-      response.aguardando = result.aguardando
-    }
-    if (result.rodadaId) {
-      response.rodadaId = result.rodadaId
-    }
-    if (result.pagoAutomaticamente !== undefined) {
+    const result = await RodadaService.jogarNovamente(req.usuarioId)
+    const response = { success: true, message: result.message, data: result }
+    if (result.cor) response.cor = result.cor
+    if (result.aguardando !== undefined) response.aguardando = result.aguardando
+    if (result.rodadaId) response.rodadaId = result.rodadaId
+    if (result.pagoAutomaticamente !== undefined)
       response.pagoAutomaticamente = result.pagoAutomaticamente
-    }
-    if (result.saldoRestante !== undefined) {
+    if (result.saldoRestante !== undefined)
       response.saldoRestante = result.saldoRestante
-    }
-
     res.json(response)
   } catch (error) {
     console.error('Erro ao jogar novamente:', error)
-    res.status(400).json({
-      success: false,
-      error: error.message
-    })
+    res.status(400).json({ success: false, error: error.message })
   }
 }
 
-// ===========================================
-// SACAR PRÊMIO DO VERDE (CORRIGIDO - VALOR DINÂMICO)
-// ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
     const { rodadaId } = req.params
     const usuarioId = req.usuarioId
-
     console.log('\n' + '='.repeat(60))
     console.log('💰 [SACAR PRÊMIO] INICIANDO SOLICITAÇÃO')
     console.log('='.repeat(60))
-    console.log(`   Rodada ID: ${rodadaId}`)
-    console.log(`   Usuário ID do token: ${usuarioId}`)
-
-    if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
+    if (!mongoose.Types.ObjectId.isValid(rodadaId))
       return res
         .status(400)
         .json({ success: false, error: 'ID da rodada inválido' })
-    }
-
     const db = mongoose.connection.db
-    const rodada = await db.collection('rodadas').findOne({
-      _id: new mongoose.Types.ObjectId(rodadaId)
-    })
-
-    if (!rodada) {
+    const rodada = await db
+      .collection('rodadas')
+      .findOne({ _id: new mongoose.Types.ObjectId(rodadaId) })
+    if (!rodada)
       return res
         .status(404)
         .json({ success: false, error: 'Rodada não encontrada' })
-    }
-
-    console.log(`\n📊 DADOS DA RODADA:`)
-    console.log(`   Nome: ${rodada.nome}`)
-    console.log(`   Status: ${rodada.status}`)
-    console.log(`   Verde (campo): ${rodada.verde}`)
-    console.log(`   Prêmio pago: ${rodada.premioVerdePago}`)
-
-    if (rodada.status !== 'concluida') {
+    if (rodada.status !== 'concluida')
       return res
         .status(400)
         .json({ success: false, error: 'Esta rodada ainda não foi concluída' })
-    }
-
-    // Verifica se o usuário é o verde ou está como concluído
     const verdeIdStr = rodada.verde?.toString
       ? rodada.verde.toString()
       : String(rodada.verde)
     const usuarioIdStr = String(usuarioId)
     const ehVerde = verdeIdStr === usuarioIdStr
-
     const participanteConcluido = rodada.participantes?.find(
       p => p.usuario.toString() === usuarioIdStr && p.cor === 'concluido'
     )
-
-    if (!ehVerde && !participanteConcluido) {
-      return res.status(403).json({
-        success: false,
-        error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
-      })
-    }
-
-    if (rodada.premioVerdePago === true) {
-      return res.status(400).json({
-        success: false,
-        error: 'Prêmio já foi solicitado anteriormente'
-      })
-    }
-
+    if (!ehVerde && !participanteConcluido)
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
+        })
+    if (rodada.premioVerdePago === true)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: 'Prêmio já foi solicitado anteriormente'
+        })
     const usuario = await User.findById(usuarioId)
-    if (!usuario) {
+    if (!usuario)
       return res
         .status(404)
         .json({ success: false, error: 'Usuário não encontrado' })
-    }
-
-    console.log(`\n👤 DADOS DO USUÁRIO:`)
-    console.log(`   Nome: ${usuario.nome}`)
-    console.log(`   Email: ${usuario.email}`)
-    console.log(`   Chave PIX: ${usuario.chavePix}`)
-    console.log(`   Saldo prêmio atual: R$ ${usuario.saldoPremio || 0}`)
-
-    // VALOR DO SAQUE = SALDO ATUAL DO USUÁRIO (já descontado os R$150 da reentrada)
     const valorSaque = usuario.saldoPremio
-    if (valorSaque <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Saldo insuficiente para saque'
-      })
-    }
-
+    if (valorSaque <= 0)
+      return res
+        .status(400)
+        .json({ success: false, error: 'Saldo insuficiente para saque' })
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,
       rodada: rodadaId,
@@ -468,30 +342,16 @@ exports.sacarPremio = async (req, res) => {
       status: 'pendente',
       dataSolicitacao: new Date()
     })
-
     await solicitacao.save()
-    console.log(`✅ Solicitação de saque criada (ID: ${solicitacao._id})`)
-
-    // Marcar que já foi solicitado (evita duplicidade)
     await db
       .collection('rodadas')
       .updateOne(
         { _id: new mongoose.Types.ObjectId(rodadaId) },
         { $set: { premioVerdePago: true } }
       )
-    console.log(`✅ Rodada marcada como premiada (premioVerdePago = true)`)
-
     console.log(
       `💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`
     )
-    console.log(
-      `💰 Saldo de prêmio permanece R$ ${
-        usuario.saldoPremio || 0
-      } (aguardando aprovação)`
-    )
-    console.log('='.repeat(60) + '\n')
-
-    // Enviar email de notificação para o admin (valor dinâmico)
     try {
       const emailController = require('./emailController')
       await emailController.notificarAdminNovaSolicitacao(
@@ -499,11 +359,9 @@ exports.sacarPremio = async (req, res) => {
         rodada,
         valorSaque
       )
-      console.log(`📧 Email de notificação enviado para o admin`)
     } catch (emailError) {
       console.error('❌ Erro ao notificar admin:', emailError)
     }
-
     res.json({
       success: true,
       message:
@@ -511,10 +369,7 @@ exports.sacarPremio = async (req, res) => {
       solicitacaoId: solicitacao._id
     })
   } catch (error) {
-    console.error('\n💥 ERRO AO SOLICITAR SAQUE:')
-    console.error(`   Mensagem: ${error.message}`)
-    console.error(`   Stack: ${error.stack}`)
-    console.log('='.repeat(60) + '\n')
+    console.error('\n💥 ERRO AO SOLICITAR SAQUE:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 }
