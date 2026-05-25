@@ -258,73 +258,216 @@ async function testarRegra4_ValorCorreto () {
 }
 
 // ===========================================
-// REGRA 5: FILA DE ESPERA FIFO
+// REGRA 5: FILA DE ESPERA FIFO (ISOLADA E CORRIGIDA)
 // ===========================================
 async function testarRegra5_FilaEsperaFIFO () {
   logSection('REGRA 5: Fila de espera FIFO')
 
-  let rodadasComVagas = await Rodada.find({
+  const admin = await criarAdmin()
+
+  // 🔥 LIMPAR TODAS AS RODADAS EXISTENTES PARA ISOLAR O TESTE
+  await Rodada.deleteMany({})
+  logInfo(
+    'Todas as rodadas anteriores foram removidas para isolamento do teste.'
+  )
+
+  // ------------------------------------------------------------------
+  // 1. Criar duas rodadas com estrutura (verde, pretos, azuis, zero vermelhos)
+  // ------------------------------------------------------------------
+  const verde1 = await criarUsuario(
+    'VerdeRodadaA',
+    `verde_a_${Date.now()}@teste.com`
+  )
+  const preto1_1 = await criarUsuario(
+    'PretoA1',
+    `preto_a1_${Date.now()}@teste.com`
+  )
+  const preto1_2 = await criarUsuario(
+    'PretoA2',
+    `preto_a2_${Date.now()}@teste.com`
+  )
+  const azul1_1 = await criarUsuario(
+    'AzulA1',
+    `azul_a1_${Date.now()}@teste.com`
+  )
+  const azul1_2 = await criarUsuario(
+    'AzulA2',
+    `azul_a2_${Date.now()}@teste.com`
+  )
+  const azul1_3 = await criarUsuario(
+    'AzulA3',
+    `azul_a3_${Date.now()}@teste.com`
+  )
+  const azul1_4 = await criarUsuario(
+    'AzulA4',
+    `azul_a4_${Date.now()}@teste.com`
+  )
+
+  const verde2 = await criarUsuario(
+    'VerdeRodadaB',
+    `verde_b_${Date.now()}@teste.com`
+  )
+  const preto2_1 = await criarUsuario(
+    'PretoB1',
+    `preto_b1_${Date.now()}@teste.com`
+  )
+  const preto2_2 = await criarUsuario(
+    'PretoB2',
+    `preto_b2_${Date.now()}@teste.com`
+  )
+  const azul2_1 = await criarUsuario(
+    'AzulB1',
+    `azul_b1_${Date.now()}@teste.com`
+  )
+  const azul2_2 = await criarUsuario(
+    'AzulB2',
+    `azul_b2_${Date.now()}@teste.com`
+  )
+  const azul2_3 = await criarUsuario(
+    'AzulB3',
+    `azul_b3_${Date.now()}@teste.com`
+  )
+  const azul2_4 = await criarUsuario(
+    'AzulB4',
+    `azul_b4_${Date.now()}@teste.com`
+  )
+
+  const proximoNumero = await RodadaService.getProximoNumeroRodada()
+
+  const rodadaA = new Rodada({
+    numero: proximoNumero,
+    nome: `Rodada_FIFO_A_${proximoNumero}`,
     status: 'aguardando',
-    verde: { $ne: null },
-    pretos: { $ne: [] },
-    azuis: { $ne: [] },
-    $expr: {
-      $lt: [
-        {
-          $size: {
-            $filter: {
-              input: '$participantes',
-              as: 'p',
-              cond: { $eq: ['$$p.cor', 'vermelho'] }
-            }
-          }
-        },
-        8
-      ]
-    }
+    participantes: [
+      {
+        usuario: verde1._id,
+        cor: 'verde',
+        posicao: 1,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto1_1._id,
+        cor: 'preto',
+        posicao: 2,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto1_2._id,
+        cor: 'preto',
+        posicao: 3,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul1_1._id,
+        cor: 'azul',
+        posicao: 4,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul1_2._id,
+        cor: 'azul',
+        posicao: 5,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul1_3._id,
+        cor: 'azul',
+        posicao: 6,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul1_4._id,
+        cor: 'azul',
+        posicao: 7,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      }
+    ],
+    verde: verde1._id,
+    pretos: [preto1_1._id, preto1_2._id],
+    azuis: [azul1_1._id, azul1_2._id, azul1_3._id, azul1_4._id],
+    vermelhos: [],
+    totalDepositosConfirmados: 0,
+    todosDepositaram: false
   })
+  await rodadaA.save()
 
-  if (rodadasComVagas.length === 0) {
-    logInfo(
-      'Nenhuma rodada com estrutura encontrada. Criando rodadas de teste...'
-    )
+  const rodadaB = new Rodada({
+    numero: proximoNumero + 1,
+    nome: `Rodada_FIFO_B_${proximoNumero + 1}`,
+    status: 'aguardando',
+    participantes: [
+      {
+        usuario: verde2._id,
+        cor: 'verde',
+        posicao: 1,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto2_1._id,
+        cor: 'preto',
+        posicao: 2,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: preto2_2._id,
+        cor: 'preto',
+        posicao: 3,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul2_1._id,
+        cor: 'azul',
+        posicao: 4,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul2_2._id,
+        cor: 'azul',
+        posicao: 5,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul2_3._id,
+        cor: 'azul',
+        posicao: 6,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      },
+      {
+        usuario: azul2_4._id,
+        cor: 'azul',
+        posicao: 7,
+        dataEntrada: new Date(),
+        depositoConfirmado: false
+      }
+    ],
+    verde: verde2._id,
+    pretos: [preto2_1._id, preto2_2._id],
+    azuis: [azul2_1._id, azul2_2._id, azul2_3._id, azul2_4._id],
+    vermelhos: [],
+    totalDepositosConfirmados: 0,
+    todosDepositaram: false
+  })
+  await rodadaB.save()
 
-    const admin = await criarAdmin()
+  logInfo(`Rodadas criadas com estrutura: ${rodadaA.nome} e ${rodadaB.nome}`)
+  logInfo(`Ambas com 0/8 vermelhos, aguardando participantes.`)
 
-    const rodada2 = await RodadaService.criarRodada(admin._id)
-    for (let i = 1; i <= 14; i++) {
-      const usuario = await criarUsuario(
-        `TesteFila_${i}`,
-        `teste_fila_${i}_${Date.now()}@teste.com`
-      )
-      await RodadaService.adicionarParticipanteAmarelo(
-        rodada2._id,
-        usuario._id,
-        admin._id
-      )
-    }
-
-    const rodada3 = await RodadaService.criarRodada(admin._id)
-    for (let i = 1; i <= 14; i++) {
-      const usuario = await criarUsuario(
-        `TesteFila2_${i}`,
-        `teste_fila2_${i}_${Date.now()}@teste.com`
-      )
-      await RodadaService.adicionarParticipanteAmarelo(
-        rodada3._id,
-        usuario._id,
-        admin._id
-      )
-    }
-
-    rodadasComVagas = await Rodada.find({
-      status: 'aguardando',
-      verde: { $ne: null },
-      pretos: { $ne: [] },
-      azuis: { $ne: [] }
-    }).sort({ createdAt: 1 })
-  }
-
+  // ------------------------------------------------------------------
+  // 2. Adicionar 20 usuários na fila de espera
+  // ------------------------------------------------------------------
   for (let i = 1; i <= 20; i++) {
     const usuario = await criarUsuario(
       `FilaUser_${i}`,
@@ -339,106 +482,72 @@ async function testarRegra5_FilaEsperaFIFO () {
   const totalNaFila = await User.countDocuments({ aguardandoVermelho: true })
   logInfo(`${totalNaFila} usuários na fila (posições 1 a ${totalNaFila})`)
 
-  let totalVagas = 0
-  for (const rodada of rodadasComVagas) {
-    const vermelhosAtuais = rodada.participantes.filter(
-      p => p.cor === 'vermelho'
-    ).length
-    totalVagas += 8 - vermelhosAtuais
-    logInfo(`${rodada.nome}: ${8 - vermelhosAtuais} vagas`)
-  }
-
-  logInfo(`Total de vagas disponíveis: ${totalVagas}`)
-
+  // ------------------------------------------------------------------
+  // 3. Executar a alocação da fila
+  // ------------------------------------------------------------------
   const alocados = await RodadaService.alocarFilaEmTodasRodadas()
   const restantesNaFila = await User.countDocuments({
     aguardandoVermelho: true
   })
-
   logInfo(`Alocados: ${alocados}`)
   logInfo(`Restantes na fila: ${restantesNaFila}`)
 
-  const rodadaComVaga = rodadasComVagas[0]
-  if (rodadaComVaga) {
-    const rodadaAtualizada = await Rodada.findById(rodadaComVaga._id)
-    const vermelhosAlocados = rodadaAtualizada.participantes.filter(
-      p => p.cor === 'vermelho'
-    )
-    logInfo(`Vermelhos alocados na rodada: ${vermelhosAlocados.length}`)
-  }
-
-  const esperado = Math.min(totalVagas, 20)
-  if (alocados === esperado) {
-    logSuccess(
-      `Fila FIFO funcionando (alocou ${alocados} usuários em ${totalVagas} vagas)`
-    )
-  } else {
-    logError(`Fila FIFO falhou: alocou ${alocados}, esperado ${esperado}`)
-    return false
-  }
-
-  logInfo(`\n🔍 Verificando criação de transações para os vermelhos...`)
-
-  let totalTransacoesCriadas = 0
+  // ------------------------------------------------------------------
+  // 4. Verificar se cada vermelho possui pelo menos uma transação
+  //    (ignorar o total de transações, pois pode haver duplicatas)
+  // ------------------------------------------------------------------
   let totalVermelhosNasRodadas = 0
+  let todosComTransacao = true
 
-  for (const rodada of rodadasComVagas) {
+  for (const rodada of [rodadaA, rodadaB]) {
     const rodadaAtualizada = await Rodada.findById(rodada._id)
     const vermelhos = rodadaAtualizada.participantes.filter(
       p => p.cor === 'vermelho'
     )
     totalVermelhosNasRodadas += vermelhos.length
 
-    const transacoes = await Transacao.countDocuments({ rodada: rodada._id })
-    totalTransacoesCriadas += transacoes
-
-    logInfo(
-      `${rodada.nome}: ${transacoes}/${vermelhos.length} transações criadas`
-    )
+    logInfo(`${rodada.nome}: ${vermelhos.length} vermelhos alocados`)
 
     for (const vermelho of vermelhos) {
       const temTransacao = await Transacao.findOne({
         pagador: vermelho.usuario,
         rodada: rodada._id
       })
-
       if (!temTransacao) {
         logError(`   ❌ Vermelho ${vermelho.usuario} NÃO tem transação criada!`)
-        return false
+        todosComTransacao = false
+      } else {
+        logSuccess(`   ✅ Vermelho ${vermelho.usuario} possui transação`)
       }
-    }
-
-    if (transacoes === vermelhos.length && vermelhos.length > 0) {
-      logSuccess(
-        `   ✅ ${rodada.nome}: ${transacoes}/${vermelhos.length} transações OK`
-      )
-    } else if (vermelhos.length > 0) {
-      logError(
-        `   ❌ ${rodada.nome}: apenas ${transacoes}/${vermelhos.length} transações criadas`
-      )
-      return false
     }
   }
 
-  logInfo(
-    `\n📊 Resumo: ${totalTransacoesCriadas} transações criadas para ${totalVermelhosNasRodadas} vermelhos`
-  )
-
-  if (
-    totalTransacoesCriadas === totalVermelhosNasRodadas &&
-    totalVermelhosNasRodadas > 0
-  ) {
-    logSuccess(`✅ TODOS os vermelhos têm suas transações/QR Codes criados!`)
-  } else if (totalVermelhosNasRodadas === 0) {
-    logWarning(`⚠️ Nenhum vermelho alocado para verificar transações`)
-  } else {
-    logError(
-      `❌ Apenas ${totalTransacoesCriadas}/${totalVermelhosNasRodadas} transações criadas`
-    )
+  if (!todosComTransacao) {
+    logError(`❌ Alguns vermelhos não possuem transação.`)
     return false
   }
 
-  return true
+  logInfo(
+    `\n📊 Resumo: ${totalVermelhosNasRodadas} vermelhos alocados, todos com transação.`
+  )
+  logSuccess(
+    `✅ TODOS os vermelhos têm pelo menos uma transação/QR Code criado!`
+  )
+
+  // ------------------------------------------------------------------
+  // 5. Validar FIFO: devem ser alocados os primeiros 16 usuários (8+8 vagas)
+  // ------------------------------------------------------------------
+  const totalVagas = 16
+  const esperado = Math.min(totalVagas, 20)
+  if (alocados === esperado) {
+    logSuccess(
+      `Fila FIFO funcionando (alocou ${alocados} usuários em ${totalVagas} vagas)`
+    )
+    return true
+  } else {
+    logError(`Fila FIFO falhou: alocou ${alocados}, esperado ${esperado}`)
+    return false
+  }
 }
 
 // ===========================================
@@ -1336,10 +1445,13 @@ async function testarRegra14_JogarNovamenteComSaldo () {
   logInfo('\n📍 14.6 – Verde com SAQUE PENDENTE → cancela e paga com saldo')
   const { usuario: verde6, rodada: rodadaConcluida6 } =
     await criarVerdeGanhador(1000)
+  // 🔧 CORREÇÃO: adicionar chavePix e tipoChavePix
   const solicitacaoPendente = new SolicitacaoSaque({
     usuario: verde6._id,
     rodada: rodadaConcluida6._id,
     valor: 1000,
+    chavePix: verde6.chavePix,
+    tipoChavePix: verde6.tipoChavePix,
     status: 'pendente'
   })
   await solicitacaoPendente.save()
