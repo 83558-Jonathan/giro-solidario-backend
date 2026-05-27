@@ -649,7 +649,7 @@ async function processarTransacoesExpiradas () {
 // ===========================================
 const TAXA_PIX = parseFloat(process.env.ABACATE_PIX_FEE) || 0.8 // valor fixo em reais
 
-1   
+const enviarPixSaque = async (
   valor,
   chavePix,
   tipoChavePix,
