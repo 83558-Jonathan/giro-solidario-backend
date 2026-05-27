@@ -108,13 +108,11 @@ exports.adicionarParticipante = async (req, res) => {
           .json({ success: false, error: 'Rodada já concluída.' })
     } catch (error) {
       if (error.message.includes('já participa de uma rodada ativa'))
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: error.message,
-            code: 'USUARIO_JA_EM_RODADA'
-          })
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+          code: 'USUARIO_JA_EM_RODADA'
+        })
       throw error
     }
     res.json({
@@ -310,19 +308,15 @@ exports.sacarPremio = async (req, res) => {
       p => p.usuario.toString() === usuarioIdStr && p.cor === 'concluido'
     )
     if (!ehVerde && !participanteConcluido)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
-        })
+      return res.status(403).json({
+        success: false,
+        error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
+      })
     if (rodada.premioVerdePago === true)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'Prêmio já foi solicitado anteriormente'
-        })
+      return res.status(400).json({
+        success: false,
+        error: 'Prêmio já foi solicitado anteriormente'
+      })
     const usuario = await User.findById(usuarioId)
     if (!usuario)
       return res
