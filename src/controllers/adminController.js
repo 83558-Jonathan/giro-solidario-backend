@@ -240,7 +240,7 @@ exports.aprovarSaque = async (req, res) => {
         .json({ success: false, error: 'Saldo insuficiente' })
     }
 
-    // Envia PIX real
+    // Envia PIX real via AbacatePay v2
     let transferId
     try {
       const resultadoPix = await enviarPixSaque(
@@ -276,7 +276,7 @@ exports.aprovarSaque = async (req, res) => {
       premioVerdePago: true
     })
 
-    // Email (opcional)
+    // Envio de e-mail de confirmação (opcional)
     try {
       const emailController = require('./emailController')
       if (emailController.notificarUsuarioSaqueAprovado) {

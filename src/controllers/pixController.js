@@ -647,6 +647,8 @@ async function processarTransacoesExpiradas () {
 // ===========================================
 // ENVIAR PIX (PAYOUT) PARA SAQUE DO VERDE (v2)
 // ===========================================
+const TAXA_PIX = parseFloat(process.env.ABACATE_PIX_FEE) || 0.8 // valor fixo em reais
+
 const enviarPixSaque = async (
   valor,
   chavePix,
@@ -658,7 +660,9 @@ const enviarPixSaque = async (
     throw new Error('Chave PIX ou tipo não informados')
   }
 
-  const valorCentavos = Math.round(valor * 100)
+  // Soma a taxa ao valor solicitado para que o usuário receba o valor líquido integral
+  const valorComTaxa = valor + TAXA_PIX
+  const valorCentavos = Math.round(valorComTaxa * 100)
 
   let tipoApi = ''
   switch (tipoChavePix.toLowerCase()) {
@@ -689,7 +693,9 @@ const enviarPixSaque = async (
   }
 
   console.log(
-    `💸 Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valor}`
+    `💸 Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valorComTaxa.toFixed(
+      2
+    )} (inclui taxa de R$ ${TAXA_PIX.toFixed(2)})`
   )
 
   try {
