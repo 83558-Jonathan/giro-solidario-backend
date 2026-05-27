@@ -26,7 +26,7 @@ const escapeHtml = require('escape-html')
 // 🔧 MOVENDO IMPORTAÇÕES PARA O TOPO (evita recarregamento)
 const RodadaService = require('./src/services/rodadaService')
 const Transacao = require('./src/models/Transacao')
-const abacate = require('./src/config/abacate')
+const { abacateV1 } = require('./src/config/abacate')
 const {
   processarPagamentoComControle
 } = require('./src/controllers/pixController')
@@ -71,7 +71,7 @@ setInterval(async () => {
 
     for (const transacao of transacoesPendentes) {
       try {
-        const response = await abacate.get(`/pixQrCode/check`, {
+        const response = await abacateV1.get(`/v1/pixQrCode/check`, {
           params: { id: transacao.cobrancaId }
         })
         const statusApi =
@@ -737,11 +737,11 @@ app.use((err, req, res, next) => {
 
 server.listen(PORT, () => {
   console.log(`
-  🚀 Servidor rodando na porta ${PORT}
-  📍 Ambiente: ${process.env.NODE_ENV || 'development'}
-  🔗 URL: http://localhost:${PORT}
-  💬 WebSocket (chat) ativo
-  `)
+🚀 Servidor rodando na porta ${PORT}
+📍 Ambiente: ${process.env.NODE_ENV || 'development'}
+🔗 URL: http://localhost:${PORT}
+💬 WebSocket (chat) ativo
+`)
 })
 
 module.exports = { app, server, io }

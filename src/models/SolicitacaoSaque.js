@@ -42,6 +42,18 @@ const solicitacaoSaqueSchema = new mongoose.Schema(
     aprovadoPor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
+    },
+    transferenciaPixId: {
+      type: String,
+      default: null
+    },
+    dataEnvioPix: {
+      type: Date,
+      default: null
+    },
+    erroPix: {
+      type: String,
+      default: null
     }
   },
   {

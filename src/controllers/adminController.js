@@ -2,6 +2,7 @@ const User = require('../models/User')
 const Rodada = require('../models/Rodada')
 const Transacao = require('../models/Transacao')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
+const { enviarPixSaque } = require('./pixController')
 const mongoose = require('mongoose')
 
 exports.getEstatisticas = async (req, res) => {
@@ -121,67 +122,6 @@ exports.getTodosSaques = async (req, res) => {
   }
 }
 
-exports.aprovarSaque = async (req, res) => {
-  try {
-    const { id } = req.params
-    console.log(`💰 Aprovando saque ID: ${id}`)
-    const solicitacao = await SolicitacaoSaque.findById(id)
-    if (!solicitacao)
-      return res
-        .status(404)
-        .json({ success: false, error: 'Solicitação não encontrada' })
-    if (solicitacao.status !== 'pendente')
-      return res
-        .status(400)
-        .json({ success: false, error: 'Esta solicitação já foi processada' })
-
-    const usuario = await User.findById(solicitacao.usuario)
-    if (!usuario)
-      return res
-        .status(404)
-        .json({ success: false, error: 'Usuário não encontrado' })
-    if ((usuario.saldoPremio || 0) < solicitacao.valor)
-      return res
-        .status(400)
-        .json({ success: false, error: 'Saldo insuficiente para este saque' })
-
-    usuario.saldoPremio -= solicitacao.valor
-    usuario.totalSacado = (usuario.totalSacado || 0) + solicitacao.valor
-    await usuario.save()
-
-    solicitacao.status = 'aprovado'
-    solicitacao.dataAprovacao = new Date()
-    solicitacao.aprovadoPor = req.usuarioId
-    await solicitacao.save()
-
-    await Rodada.findByIdAndUpdate(solicitacao.rodada, {
-      premioVerdePago: true
-    })
-    console.log(
-      `✅ Saque aprovado: R$ ${solicitacao.valor} debitado de ${usuario.nome}. Saldo restante: R$ ${usuario.saldoPremio}`
-    )
-
-    try {
-      const emailController = require('./emailController')
-      if (emailController.notificarUsuarioSaqueAprovado)
-        await emailController.notificarUsuarioSaqueAprovado(
-          usuario,
-          solicitacao
-        )
-    } catch (emailError) {
-      console.error('Erro ao enviar email de aprovação:', emailError)
-    }
-
-    res.json({
-      success: true,
-      message: `Saque de R$ ${solicitacao.valor} aprovado. Saldo restante: R$ ${usuario.saldoPremio}`
-    })
-  } catch (error) {
-    console.error('Erro ao aprovar saque:', error)
-    res.status(500).json({ success: false, error: error.message })
-  }
-}
-
 exports.recusarSaque = async (req, res) => {
   try {
     const { id } = req.params
@@ -267,6 +207,94 @@ exports.getRodadaDetalhes = async (req, res) => {
     res.json({ success: true, data: { ...rodada.toObject(), stats } })
   } catch (error) {
     console.error('Erro ao buscar detalhes da rodada:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+exports.aprovarSaque = async (req, res) => {
+  try {
+    const { id } = req.params
+    console.log(`💰 Aprovando saque ID: ${id}`)
+
+    const solicitacao = await SolicitacaoSaque.findById(id)
+    if (!solicitacao) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'Solicitação não encontrada' })
+    }
+    if (solicitacao.status !== 'pendente') {
+      return res
+        .status(400)
+        .json({ success: false, error: 'Solicitação já foi processada' })
+    }
+
+    const usuario = await User.findById(solicitacao.usuario)
+    if (!usuario) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'Usuário não encontrado' })
+    }
+    if ((usuario.saldoPremio || 0) < solicitacao.valor) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'Saldo insuficiente' })
+    }
+
+    // Envia PIX real
+    let transferId
+    try {
+      const resultadoPix = await enviarPixSaque(
+        solicitacao.valor,
+        solicitacao.chavePix,
+        solicitacao.tipoChavePix,
+        solicitacao._id,
+        usuario.nome
+      )
+      transferId = resultadoPix.transferId
+      console.log(`💸 Transferência PIX autorizada: ${transferId}`)
+    } catch (pixError) {
+      console.error('❌ Falha no envio do PIX:', pixError.message)
+      return res.status(500).json({
+        success: false,
+        error: `Não foi possível realizar o pagamento: ${pixError.message}`
+      })
+    }
+
+    // Atualiza saldo e status
+    usuario.saldoPremio -= solicitacao.valor
+    usuario.totalSacado = (usuario.totalSacado || 0) + solicitacao.valor
+    await usuario.save()
+
+    solicitacao.status = 'aprovado'
+    solicitacao.dataAprovacao = new Date()
+    solicitacao.aprovadoPor = req.usuarioId
+    solicitacao.transferenciaPixId = transferId
+    solicitacao.dataEnvioPix = new Date()
+    await solicitacao.save()
+
+    await Rodada.findByIdAndUpdate(solicitacao.rodada, {
+      premioVerdePago: true
+    })
+
+    // Email (opcional)
+    try {
+      const emailController = require('./emailController')
+      if (emailController.notificarUsuarioSaqueAprovado) {
+        await emailController.notificarUsuarioSaqueAprovado(
+          usuario,
+          solicitacao
+        )
+      }
+    } catch (emailError) {
+      console.error('Erro ao enviar email:', emailError)
+    }
+
+    res.json({
+      success: true,
+      message: `Saque aprovado e PIX enviado para ${solicitacao.chavePix}. Saldo restante: R$ ${usuario.saldoPremio}`
+    })
+  } catch (error) {
+    console.error('Erro ao aprovar saque:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 }

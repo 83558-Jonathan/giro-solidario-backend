@@ -1,4 +1,4 @@
-const abacate = require('../config/abacate')
+const { abacateV1, abacateV2 } = require('../config/abacate')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
 const User = require('../models/User')
@@ -221,7 +221,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 }
 
 // ===========================================
-// CRIAR COBRANÇA PIX
+// CRIAR COBRANÇA PIX (v1)
 // ===========================================
 const criarCobrancaPix = async (req, res) => {
   try {
@@ -243,12 +243,10 @@ const criarCobrancaPix = async (req, res) => {
         .status(400)
         .json({ success: false, error: 'Esta transação já foi paga' })
     if (transacao.status === 'cancelada_expirada')
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'Transação expirada. Não é possível gerar novo PIX.'
-        })
+      return res.status(400).json({
+        success: false,
+        error: 'Transação expirada. Não é possível gerar novo PIX.'
+      })
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -257,7 +255,7 @@ const criarCobrancaPix = async (req, res) => {
       expiresIn: 3600,
       metadata: { externalId: transacao._id.toString() }
     }
-    const response = await abacate.post('/pixQrCode/create', payload)
+    const response = await abacateV1.post('/v1/pixQrCode/create', payload)
     const {
       id: cobrancaId,
       brCode,
@@ -313,18 +311,16 @@ const criarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao criar QR Code PIX:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
+    })
   }
 }
 
 // ===========================================
-// VERIFICAR STATUS
+// VERIFICAR STATUS (v1)
 // ===========================================
 const verificarStatus = async (req, res) => {
   try {
@@ -355,7 +351,7 @@ const verificarStatus = async (req, res) => {
 
     if (transacao.cobrancaId && !expirado) {
       try {
-        const response = await abacate.get(`/pixQrCode/check`, {
+        const response = await abacateV1.get(`/v1/pixQrCode/check`, {
           params: { id: transacao.cobrancaId }
         })
         const statusApi =
@@ -392,7 +388,7 @@ const verificarStatus = async (req, res) => {
 }
 
 // ===========================================
-// RENOVAR COBRANÇA
+// RENOVAR COBRANÇA (v1)
 // ===========================================
 const renovarCobrancaPix = async (req, res) => {
   try {
@@ -411,24 +407,20 @@ const renovarCobrancaPix = async (req, res) => {
         .status(404)
         .json({ success: false, error: 'Transação não encontrada' })
     if (transacao.status !== 'pendente')
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'Não é possível renovar esta cobrança – status inválido'
-        })
+      return res.status(400).json({
+        success: false,
+        error: 'Não é possível renovar esta cobrança – status inválido'
+      })
 
     const aindaNaRodada = await Rodada.findOne({
       'participantes.usuario': transacao.pagador._id,
       'participantes.transacaoId': transacaoId
     })
     if (!aindaNaRodada)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'Você não está mais na rodada. Renovação não permitida.'
-        })
+      return res.status(400).json({
+        success: false,
+        error: 'Você não está mais na rodada. Renovação não permitida.'
+      })
 
     const valorCentavos = Math.round(VALOR_VERMELHO * 100)
     const payload = {
@@ -437,7 +429,7 @@ const renovarCobrancaPix = async (req, res) => {
       expiresIn: 3600,
       metadata: { externalId: transacao._id.toString() }
     }
-    const response = await abacate.post('/pixQrCode/create', payload)
+    const response = await abacateV1.post('/v1/pixQrCode/create', payload)
     const {
       id: novaCobrancaId,
       brCode,
@@ -480,13 +472,11 @@ const renovarCobrancaPix = async (req, res) => {
     })
   } catch (error) {
     console.error('❌ Erro ao renovar PIX:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error:
+        error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
+    })
   }
 }
 
@@ -655,6 +645,66 @@ async function processarTransacoesExpiradas () {
 }
 
 // ===========================================
+// ENVIAR PIX (PAYOUT) PARA SAQUE DO VERDE (v2)
+// ===========================================
+const enviarPixSaque = async (
+  valor,
+  chavePix,
+  tipoChavePix,
+  solicitacaoId,
+  usuarioNome
+) => {
+  if (!chavePix || !tipoChavePix) {
+    throw new Error('Chave PIX ou tipo não informados')
+  }
+
+  const valorCentavos = Math.round(valor * 100)
+
+  let tipoApi = ''
+  switch (tipoChavePix.toLowerCase()) {
+    case 'cpf':
+      tipoApi = 'CPF'
+      break
+    case 'email':
+      tipoApi = 'EMAIL'
+      break
+    case 'telefone':
+      tipoApi = 'PHONE'
+      break
+    case 'aleatoria':
+      tipoApi = 'RANDOM'
+      break
+    default:
+      tipoApi = 'EMAIL'
+  }
+
+  const payload = {
+    amount: valorCentavos,
+    externalId: solicitacaoId.toString(),
+    description: `Saque Giro Premiado - ${usuarioNome}`,
+    pix: {
+      key: chavePix,
+      type: tipoApi
+    }
+  }
+
+  console.log(
+    `💸 Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valor}`
+  )
+
+  try {
+    const response = await abacateV2.post('/v2/pix/send', payload)
+    const transferId = response.data.data?.id || response.data.id
+    console.log(`✅ PIX de saque enviado com sucesso. ID: ${transferId}`)
+    return { success: true, transferId }
+  } catch (error) {
+    const errorMsg = error.response?.data?.error || error.message
+    console.error('❌ Erro ao enviar PIX de saque:', errorMsg)
+    throw new Error(`Falha na transferência: ${errorMsg}`)
+  }
+}
+
+// ===========================================
 // REMOVER VERMELHOS INADIMPLENTES (JOB HORÁRIO)
 // ===========================================
 async function removerVermelhosInadimplentes () {
@@ -756,5 +806,6 @@ module.exports = {
   processarTransacoesExpiradas,
   initializeIo,
   removerVermelhosInadimplentes,
-  setRodadaService
+  setRodadaService,
+  enviarPixSaque
 }

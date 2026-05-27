@@ -1,4 +1,4 @@
-const abacate = require('../config/abacate')
+const { abacateV1 } = require('../config/abacate')
 const Transacao = require('../models/Transacao')
 const User = require('../models/User')
 const emailController = require('../controllers/emailController')
@@ -19,7 +19,7 @@ async function gerarQrCodeParaTransacao (transacaoId) {
     expiresIn: 3600,
     metadata: { externalId: transacao._id.toString() }
   }
-  const response = await abacate.post('/pixQrCode/create', payload)
+  const response = await abacateV1.post('/v1/pixQrCode/create', payload)
   const { id: cobrancaId, brCode, brCodeBase64, expiresAt } = response.data.data
 
   transacao.cobrancaId = cobrancaId
