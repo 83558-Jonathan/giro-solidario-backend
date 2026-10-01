@@ -6,14 +6,17 @@ const Joi = require('joi')
 // ===========================================
 const registerSchema = Joi.object({
   nome: Joi.string().min(3).max(100).required().messages({
+    'string.base': 'Nome inválido',
     'string.empty': 'Nome é obrigatório',
     'string.min': 'Nome deve ter pelo menos 3 caracteres',
+    'string.max': 'Nome muito longo (máximo 100 caracteres)',
     'any.required': 'Nome é obrigatório'
   }),
 
   email: Joi.string().email().required().messages({
-    'string.email': 'Email inválido',
+    'string.base': 'Email inválido',
     'string.empty': 'Email é obrigatório',
+    'string.email': 'Digite um email válido (ex: seu@email.com)',
     'any.required': 'Email é obrigatório'
   }),
 
@@ -21,14 +24,16 @@ const registerSchema = Joi.object({
     .pattern(/^[0-9]{11}$/)
     .required()
     .messages({
-      'string.pattern.base': 'CPF deve ter 11 dígitos',
+      'string.base': 'CPF inválido',
       'string.empty': 'CPF é obrigatório',
+      'string.pattern.base': 'CPF deve ter 11 dígitos (só números)',
       'any.required': 'CPF é obrigatório'
     }),
 
   senha: Joi.string().min(6).required().messages({
-    'string.min': 'Senha deve ter pelo menos 6 caracteres',
+    'string.base': 'Senha inválida',
     'string.empty': 'Senha é obrigatória',
+    'string.min': 'Senha deve ter pelo menos 6 caracteres',
     'any.required': 'Senha é obrigatória'
   }),
 
@@ -40,19 +45,29 @@ const registerSchema = Joi.object({
 // Aceita email OU cpf (pelo menos um dos dois)
 // ===========================================
 const loginSchema = Joi.object({
-  email: Joi.string().email().optional().allow('', null),
+  email: Joi.string().email().optional().allow('', null).messages({
+    'string.base': 'Email inválido',
+    'string.email': 'Digite um email válido (ex: seu@email.com)'
+  }),
+
   cpf: Joi.string()
     .pattern(/^[0-9]{11}$/)
     .optional()
-    .allow('', null),
+    .allow('', null)
+    .messages({
+      'string.base': 'CPF inválido',
+      'string.pattern.base': 'CPF deve ter 11 dígitos (só números)'
+    }),
+
   senha: Joi.string().required().messages({
+    'string.base': 'Senha inválida',
     'string.empty': 'Senha é obrigatória',
     'any.required': 'Senha é obrigatória'
   })
 })
   .or('email', 'cpf')
   .messages({
-    'object.missing': 'Informe email ou CPF'
+    'object.missing': 'Informe seu email ou CPF'
   })
 
 // ===========================================
@@ -60,7 +75,9 @@ const loginSchema = Joi.object({
 // ===========================================
 const forgotPasswordSchema = Joi.object({
   email: Joi.string().email().required().messages({
-    'string.email': 'Email inválido',
+    'string.base': 'Email inválido',
+    'string.empty': 'Email é obrigatório',
+    'string.email': 'Digite um email válido (ex: seu@email.com)',
     'any.required': 'Email é obrigatório'
   })
 })
@@ -71,13 +88,42 @@ const forgotPasswordSchema = Joi.object({
 // ===========================================
 const resetPasswordSchema = Joi.object({
   token: Joi.string().required().messages({
+    'string.base': 'Token inválido',
+    'string.empty': 'Token é obrigatório',
     'any.required': 'Token é obrigatório'
   }),
+
   senha: Joi.string().min(6).required().messages({
+    'string.base': 'Senha inválida',
+    'string.empty': 'Nova senha é obrigatória',
     'string.min': 'Senha deve ter pelo menos 6 caracteres',
     'any.required': 'Nova senha é obrigatória'
   })
 })
+
+// ===========================================
+// HELPER: resposta amigável para erros de validação
+// ===========================================
+function responderErroValidacao (res, error) {
+  // Pega a primeira mensagem; se vazia, usa fallback
+  const detalhe = error?.details?.[0]
+  const mensagem =
+    detalhe?.message || 'Dados inválidos. Verifique e tente novamente.'
+
+  // Log detalhado em dev para facilitar debug
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('⚠️ [validação]', {
+      path: detalhe?.path?.join('.'),
+      type: detalhe?.type,
+      message: mensagem
+    })
+  }
+
+  return res.status(400).json({
+    success: false,
+    error: mensagem
+  })
+}
 
 // ===========================================
 // MIDDLEWARES
@@ -87,13 +133,8 @@ const validateRegister = (req, res, next) => {
     abortEarly: true,
     stripUnknown: true // remove campos extras (ex: telefone, chavePix, se vierem)
   })
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.details[0].message
-    })
-  }
-  req.body = value // substitui pelo objeto validado/limpo
+  if (error) return responderErroValidacao(res, error)
+  req.body = value
   next()
 }
 
@@ -102,12 +143,7 @@ const validateLogin = (req, res, next) => {
     abortEarly: true,
     stripUnknown: true
   })
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.details[0].message
-    })
-  }
+  if (error) return responderErroValidacao(res, error)
   req.body = value
   next()
 }
@@ -117,12 +153,7 @@ const validateForgotPassword = (req, res, next) => {
     abortEarly: true,
     stripUnknown: true
   })
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.details[0].message
-    })
-  }
+  if (error) return responderErroValidacao(res, error)
   req.body = value
   next()
 }
@@ -132,12 +163,7 @@ const validateResetPassword = (req, res, next) => {
     abortEarly: true,
     stripUnknown: true
   })
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.details[0].message
-    })
-  }
+  if (error) return responderErroValidacao(res, error)
   req.body = value
   next()
 }

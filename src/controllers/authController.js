@@ -7,6 +7,7 @@ const mongoose = require('mongoose')
 const RodadaService = require('../services/rodadaService')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const nodemailer = require('nodemailer')
+const emailController = require('./emailController')
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.hostinger.com',
@@ -121,7 +122,6 @@ exports.registrar = async (req, res) => {
 
     const { nome, email, cpf, senha, codigoConvite } = req.body
 
-    // ---- Validações de entrada ----
     if (!nome || !email || !cpf || !senha) {
       return res.status(400).json({
         success: false,
@@ -129,7 +129,6 @@ exports.registrar = async (req, res) => {
       })
     }
 
-    // ✅ Senha: apenas tamanho mínimo (sem exigir maiúscula/número)
     if (String(senha).length < 6) {
       return res.status(400).json({
         success: false,
@@ -154,7 +153,6 @@ exports.registrar = async (req, res) => {
       })
     }
 
-    // ---- Verifica duplicidade ----
     const existe = await User.findOne({
       $or: [{ email: emailNormalizado }, { cpf: cpfLimpo }]
     })
@@ -165,7 +163,6 @@ exports.registrar = async (req, res) => {
         .json({ success: false, error: `${campo} já cadastrado` })
     }
 
-    // ---- Cria usuário ----
     const salt = await bcrypt.genSalt(10)
     const senhaHash = await bcrypt.hash(senha, salt)
 
@@ -181,7 +178,7 @@ exports.registrar = async (req, res) => {
     console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
 
     // ===========================================
-    // LÓGICA DE FILA / RODADA / INDICAÇÃO (inalterada)
+    // LÓGICA DE FILA / RODADA / INDICAÇÃO
     // ===========================================
     let indicador = null,
       rodadaAdicionada = null,
@@ -324,7 +321,38 @@ exports.registrar = async (req, res) => {
       }
     }
 
-    // ---- Resposta ----
+    // ===========================================
+    // ENVIO DE EMAILS (não bloqueia a resposta)
+    // ===========================================
+    // 1. Boas-vindas — sempre
+    emailController
+      .enviarEmailBoasVindas(usuario, { entrouNaFila, posicaoFila })
+      .catch(err =>
+        console.error('❌ [email] Falha ao enviar boas-vindas:', err.message)
+      )
+
+    // 2. QR Code PIX — se gerou pagamento (o pixController já chamou no fluxo, mas reforçamos)
+    if (dadosPagamento && usuario.email) {
+      const rodadaPopulada = rodadaIdAdicionada
+        ? await Rodada.findById(rodadaIdAdicionada).select('nome')
+        : null
+      emailController
+        .enviarEmailQrCodePix(
+          usuario,
+          { _id: dadosPagamento.id },
+          dadosPagamento.qrCode,
+          dadosPagamento.qrCodeImage,
+          dadosPagamento.valor,
+          rodadaPopulada
+        )
+        .catch(err =>
+          console.error('❌ [email] Falha ao enviar QR Code:', err.message)
+        )
+    }
+
+    // ===========================================
+    // RESPOSTA
+    // ===========================================
     const token = gerarToken(usuario._id)
     const response = {
       success: true,
@@ -360,7 +388,6 @@ exports.registrar = async (req, res) => {
     console.log(`   Email: ${usuario.email}`)
     console.log(`   CPF: ${usuario.cpf}`)
     console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
-    console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
     console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`)
     console.log(`   Pagamento: ${dadosPagamento ? 'QR Code gerado' : 'Nenhum'}`)
@@ -368,7 +395,6 @@ exports.registrar = async (req, res) => {
   } catch (error) {
     console.error('❌ Erro no registro:', error)
 
-    // Tratamento de erro de duplicidade do Mongo (unique index)
     if (error.code === 11000) {
       const campo = Object.keys(error.keyPattern || {})[0] || 'campo'
       return res.status(400).json({
@@ -401,7 +427,6 @@ exports.login = async (req, res) => {
       })
     }
 
-    // Monta a query: prioriza email se ambos forem enviados
     let query = null
     if (email) {
       query = { email: String(email).trim().toLowerCase() }
@@ -450,7 +475,7 @@ exports.login = async (req, res) => {
 }
 
 // ===========================================
-// GET ME (inalterado)
+// GET ME
 // ===========================================
 exports.getMe = async (req, res) => {
   try {
@@ -516,18 +541,37 @@ exports.forgotPassword = async (req, res) => {
     usuario.resetPasswordToken = token
     usuario.resetPasswordExpires = expires
     await usuario.save()
+
     const resetUrl = `${
       process.env.FRONTEND_URL || 'https://giropremiados.com.br'
     }/reset-password?token=${token}`
-    const mailOptions = {
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9fafb;padding:24px;border-radius:12px;">
+        <div style="background:linear-gradient(135deg,#10B981,#059669);padding:24px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:22px;">🔐 Recuperação de Senha</h1>
+        </div>
+        <div style="background:#fff;padding:28px;border-radius:0 0 12px 12px;">
+          <p>Olá <strong>${usuario.nome}</strong>,</p>
+          <p>Você solicitou a recuperação de senha da sua conta no Giro Premiado.</p>
+          <p>Clique no botão abaixo para criar uma nova senha. O link é válido por <strong>1 hora</strong>:</p>
+          <div style="text-align:center;margin:28px 0;">
+            <a href="${resetUrl}" style="display:inline-block;background:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:bold;">REDEFINIR SENHA</a>
+          </div>
+          <p style="color:#6b7280;font-size:13px;">Se você não solicitou isso, ignore este email. Sua senha permanecerá a mesma.</p>
+          <p style="color:#9ca3af;font-size:12px;margin-top:24px;">Link direto: <br>${resetUrl}</p>
+        </div>
+      </div>
+    `
+
+    await transporter.sendMail({
       from: `"Giro Premiado" <${
         process.env.SMTP_USER || 'naoresponder@giropremiados.com.br'
       }>`,
       to: usuario.email,
-      subject: 'Recuperação de Senha - Giro Premiado',
-      html: `<div>...</div>` // manter o HTML original
-    }
-    await transporter.sendMail(mailOptions)
+      subject: '🔐 Recuperação de Senha - Giro Premiado',
+      html
+    })
     res.json({
       success: true,
       message: 'Email de recuperação enviado com sucesso'
@@ -542,7 +586,7 @@ exports.forgotPassword = async (req, res) => {
 }
 
 // ===========================================
-// RESET PASSWORD — agora só valida tamanho mínimo
+// RESET PASSWORD
 // ===========================================
 exports.resetPassword = async (req, res) => {
   try {
@@ -552,7 +596,6 @@ exports.resetPassword = async (req, res) => {
         .status(400)
         .json({ success: false, error: 'Token e nova senha são obrigatórios' })
 
-    // ✅ Senha: apenas tamanho mínimo (sem exigir maiúscula/número)
     if (senha.length < 6)
       return res.status(400).json({
         success: false,
