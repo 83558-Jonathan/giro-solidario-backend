@@ -3,6 +3,7 @@ const User = require('../models/User')
 const Transacao = require('../models/Transacao')
 const ChatMessage = require('../models/ChatMessage')
 const { gerarQrCodeParaTransacao } = require('../utils/qrCodeHelper')
+const { VALOR_VERMELHO, PREMIO_VERDE } = require('../config/constantes')
 
 const pagamentosProcessadosService = new Map()
 const processandoRodadas = new Map()
@@ -294,7 +295,7 @@ class RodadaService {
             tipo: 'deposito',
             pagador: usuarioId,
             recebedor: verdeId,
-            valor: 150,
+            valor: VALOR_VERMELHO,
             rodada: rodadaId,
             status: 'pendente'
           })
@@ -358,7 +359,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // CRIAR TRANSACAO INDIVIDUAL PARA VERMELHO (VALOR CORRETO: R$ 150)
+  // CRIAR TRANSACAO INDIVIDUAL PARA VERMELHO
   // ===========================================
   async criarTransacaoParaVermelho (rodadaId, vermelhoId) {
     try {
@@ -368,7 +369,7 @@ class RodadaService {
       const verdeId = rodada.verde
       if (!verdeId) throw new Error('Verde nao definido na rodada')
 
-      const valor = 150
+      const valor = VALOR_VERMELHO
 
       const transacao = new Transacao({
         tipo: 'deposito',
@@ -463,7 +464,7 @@ class RodadaService {
                 tipo: 'deposito',
                 pagador: p.usuario,
                 recebedor: rodada.verde,
-                valor: 150,
+                valor: VALOR_VERMELHO,
                 rodada: rodadaId,
                 status: 'pendente'
               })
@@ -523,7 +524,7 @@ class RodadaService {
       if (ioInstance) {
         const mensagemInicio = new ChatMessage({
           rodadaId: rodada._id,
-          mensagem: `🎲 A rodada foi iniciada! Os 8 VERMELHOS devem pagar R$150 para que a rodada avance. O VERDE receberá R$1000 quando todos pagarem.`,
+          mensagem: `🎲 A rodada foi iniciada! Os 8 VERMELHOS devem pagar R$${VALOR_VERMELHO} para que a rodada avance. O VERDE receberá R$${PREMIO_VERDE} quando todos pagarem.`,
           tipo: 'sistema',
           acao: 'rodada_iniciada',
           createdAt: new Date()
@@ -547,7 +548,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // CRIAR TRANSACOES INICIAIS (8 vermelhos) - VALOR CORRETO
+  // CRIAR TRANSACOES INICIAIS (8 vermelhos)
   // ===========================================
   async criarTransacoesIniciais (rodadaId) {
     try {
@@ -556,7 +557,7 @@ class RodadaService {
 
       const transacoes = []
       const verde = rodada.verde
-      const valor = 150
+      const valor = VALOR_VERMELHO
       const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho')
 
       if (!verde) throw new Error('Verde nao definido')
@@ -780,7 +781,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // CRIAR TRANSACOES PARA VERMELHOS (VALOR CORRETO: R$ 150)
+  // CRIAR TRANSACOES PARA VERMELHOS
   // ===========================================
   async criarTransacoesParaVermelhos (rodadaId) {
     // Evitar execução simultânea para a mesma rodada
@@ -812,7 +813,7 @@ class RodadaService {
       )
 
       const transacoes = []
-      const valor = 150
+      const valor = VALOR_VERMELHO
 
       for (const participante of vermelhos) {
         const vermelhoId = participante.usuario
@@ -1140,7 +1141,7 @@ class RodadaService {
             // CORREÇÃO: PAGAMENTO AUTOMÁTICO COM SALDO (REGRAS 14.5)
             // ======================================================
             const usuarioAlocado = await User.findById(usuario._id)
-            if (usuarioAlocado.saldoPremio >= 150) {
+            if (usuarioAlocado.saldoPremio >= VALOR_VERMELHO) {
               const transacao = await Transacao.findOne({
                 pagador: usuario._id,
                 rodada: rodadaAtual._id,
@@ -1151,13 +1152,13 @@ class RodadaService {
                 transacao.dataConfirmacao = new Date()
                 transacao.metadata = {
                   pagoComSaldo: true,
-                  valorDescontado: 150
+                  valorDescontado: VALOR_VERMELHO
                 }
                 await transacao.save()
 
                 await User.updateOne(
                   { _id: usuario._id },
-                  { $inc: { saldoPremio: -150 } }
+                  { $inc: { saldoPremio: -VALOR_VERMELHO } }
                 )
 
                 await Rodada.updateOne(
@@ -1171,8 +1172,8 @@ class RodadaService {
                 console.log(
                   `💰 Pagamento automático (fila): usuário ${
                     usuario.nome
-                  } pagou R$150 com saldo. Saldo restante: R$ ${
-                    usuarioAlocado.saldoPremio - 150
+                  } pagou R$${VALOR_VERMELHO} com saldo. Saldo restante: R$ ${
+                    usuarioAlocado.saldoPremio - VALOR_VERMELHO
                   }`
                 )
               }
@@ -1289,7 +1290,7 @@ class RodadaService {
 
       const verdeAtual = rodada.participantes.find(p => p.cor === 'verde')
       console.log(
-        `[DEBUG] Verde atual que ganhou R$ 1000: ${verdeAtual?.usuario}`
+        `[DEBUG] Verde atual que ganhou R$ ${PREMIO_VERDE}: ${verdeAtual?.usuario}`
       )
 
       // Promover cores
@@ -1306,13 +1307,15 @@ class RodadaService {
           console.log(`   preto->verde ${p.usuario}`)
         } else if (p.cor === 'verde') {
           p.cor = 'concluido'
-          console.log(`   verde->concluido ${p.usuario} (ganhou R$ 1000)`)
+          console.log(
+            `   verde->concluido ${p.usuario} (ganhou R$ ${PREMIO_VERDE})`
+          )
           try {
             await User.findByIdAndUpdate(p.usuario, {
-              $inc: { saldoPremio: 1000, totalGanho: 1000 }
+              $inc: { saldoPremio: PREMIO_VERDE, totalGanho: PREMIO_VERDE }
             })
             console.log(
-              `   💰 Prêmio de R$ 1.000 creditado ao usuário ${p.usuario}`
+              `   💰 Prêmio de R$ ${PREMIO_VERDE} creditado ao usuário ${p.usuario}`
             )
           } catch (err) {
             console.error(`   ❌ Erro ao creditar prêmio: ${err.message}`)
@@ -1391,7 +1394,7 @@ class RodadaService {
         usuario: verdeAtual.usuario,
         corAnterior: 'verde',
         corNova: 'concluido',
-        observacao: `✅ RODADA CONCLUÍDA! Prêmio de R$ 1000 disponível para saque.`,
+        observacao: `✅ RODADA CONCLUÍDA! Prêmio de R$ ${PREMIO_VERDE} disponível para saque.`,
         data: new Date()
       })
 
@@ -1443,13 +1446,13 @@ class RodadaService {
       }
 
       console.log(`[FINALIZACAO] Rodada ${rodada.nome} concluída com sucesso!`)
-      console.log(`   🏆 Verde vencedor ganhou R$ 1000`)
+      console.log(`   🏆 Verde vencedor ganhou R$ ${PREMIO_VERDE}`)
       console.log(`   Novas rodadas geradas: ${rodada.rodadasGeradas.length}`)
 
       if (ioInstance) {
         const mensagemConclusao = new ChatMessage({
           rodadaId: rodada._id,
-          mensagem: `🏆 PARABÉNS! A rodada foi concluída. O VERDE ganhou R$1000! Duas novas rodadas foram criadas.`,
+          mensagem: `🏆 PARABÉNS! A rodada foi concluída. O VERDE ganhou R$${PREMIO_VERDE}! Duas novas rodadas foram criadas.`,
           tipo: 'sistema',
           acao: 'rodada_concluida',
           createdAt: new Date()
@@ -1750,7 +1753,7 @@ class RodadaService {
           )
       )
 
-      const totalGanho = rodadasConcluidas.length * 1000
+      const totalGanho = rodadasConcluidas.length * PREMIO_VERDE
 
       // CALCULO CORRETO: Esta na fila de espera apenas se:
       // 1. Tem a flag aguardandoVermelho = true
@@ -2003,7 +2006,7 @@ class RodadaService {
         )
       }
 
-      const temSaldo = saldoAtual >= 150
+      const temSaldo = saldoAtual >= VALOR_VERMELHO
       let pagoAutomaticamente = false
       let saldoRestante = saldoAtual
 
@@ -2089,7 +2092,7 @@ class RodadaService {
               tipo: 'deposito',
               pagador: usuarioId,
               recebedor: verdeId,
-              valor: 150,
+              valor: VALOR_VERMELHO,
               rodada: rodadaParaEntrar._id,
               status: 'pendente'
             })
@@ -2099,11 +2102,16 @@ class RodadaService {
           transacaoId = transacao._id
 
           if (temSaldo) {
-            console.log(`💰 Pagando com saldo. Desconto de R$ 150.`)
+            console.log(
+              `💰 Pagando com saldo. Desconto de R$ ${VALOR_VERMELHO}.`
+            )
 
             transacao.status = 'confirmado'
             transacao.dataConfirmacao = new Date()
-            transacao.metadata = { pagoComSaldo: true, valorDescontado: 150 }
+            transacao.metadata = {
+              pagoComSaldo: true,
+              valorDescontado: VALOR_VERMELHO
+            }
             await transacao.save()
 
             const rodadaAtualizada = await Rodada.findById(rodadaParaEntrar._id)
@@ -2134,7 +2142,7 @@ class RodadaService {
 
             const usuarioAtualizado = await User.findOneAndUpdate(
               { _id: usuarioId, saldoPremio: saldoAtual },
-              { $inc: { saldoPremio: -150 } },
+              { $inc: { saldoPremio: -VALOR_VERMELHO } },
               { new: true }
             )
             if (!usuarioAtualizado)
@@ -2160,8 +2168,8 @@ class RodadaService {
         }
 
         const message = pagoAutomaticamente
-          ? `✅ Entrou como VERMELHO na ${rodadaParaEntrar.nome}. Pagamento de R$150 descontado. Saldo restante: R$ ${saldoRestante}.`
-          : `✅ Entrou como VERMELHO na ${rodadaParaEntrar.nome}. Gere o QR Code para pagar R$ 150.`
+          ? `✅ Entrou como VERMELHO na ${rodadaParaEntrar.nome}. Pagamento de R$${VALOR_VERMELHO} descontado. Saldo restante: R$ ${saldoRestante}.`
+          : `✅ Entrou como VERMELHO na ${rodadaParaEntrar.nome}. Gere o QR Code para pagar R$ ${VALOR_VERMELHO}.`
 
         return {
           success: true,

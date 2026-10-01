@@ -106,49 +106,73 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
   }
 }
 
+// ===========================================
+// REGISTRAR — nome, email, cpf, senha (+ codigoConvite opcional)
+// ===========================================
 exports.registrar = async (req, res) => {
   try {
-    console.log('📝 Registro recebido:', req.body)
-    const {
-      nome,
-      email,
-      telefone,
-      cpf,
-      chavePix,
-      tipoChavePix,
-      senha,
-      codigoConvite
-    } = req.body
+    console.log('📝 Registro recebido:', {
+      nome: req.body?.nome,
+      email: req.body?.email,
+      cpf: req.body?.cpf,
+      temSenha: !!req.body?.senha,
+      codigoConvite: req.body?.codigoConvite
+    })
 
-    if (
-      !nome ||
-      !email ||
-      !telefone ||
-      !cpf ||
-      !chavePix ||
-      !tipoChavePix ||
-      !senha
-    )
+    const { nome, email, cpf, senha, codigoConvite } = req.body
+
+    // ---- Validações de entrada ----
+    if (!nome || !email || !cpf || !senha) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nome, email, CPF e senha são obrigatórios'
+      })
+    }
+
+    // ✅ Senha: apenas tamanho mínimo (sem exigir maiúscula/número)
+    if (String(senha).length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Senha deve ter pelo menos 6 caracteres'
+      })
+    }
+
+    const cpfLimpo = String(cpf).replace(/\D/g, '')
+    if (cpfLimpo.length !== 11) {
+      return res.status(400).json({
+        success: false,
+        error: 'CPF deve ter 11 dígitos'
+      })
+    }
+
+    const emailNormalizado = String(email).trim().toLowerCase()
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(emailNormalizado)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email inválido'
+      })
+    }
+
+    // ---- Verifica duplicidade ----
+    const existe = await User.findOne({
+      $or: [{ email: emailNormalizado }, { cpf: cpfLimpo }]
+    })
+    if (existe) {
+      const campo = existe.email === emailNormalizado ? 'Email' : 'CPF'
       return res
         .status(400)
-        .json({ success: false, error: 'Todos os campos são obrigatórios' })
+        .json({ success: false, error: `${campo} já cadastrado` })
+    }
 
-    const existe = await User.findOne({ $or: [{ email }, { cpf }] })
-    if (existe)
-      return res
-        .status(400)
-        .json({ success: false, error: 'Usuário já existe' })
-
+    // ---- Cria usuário ----
     const salt = await bcrypt.genSalt(10)
     const senhaHash = await bcrypt.hash(senha, salt)
 
     const usuario = new User({
-      nome,
-      email,
-      telefone,
-      cpf,
-      chavePix,
-      tipoChavePix,
+      nome: nome.trim(),
+      email: emailNormalizado,
+      cpf: cpfLimpo,
       senha: senhaHash
     })
     usuario.codigoConvite =
@@ -156,6 +180,9 @@ exports.registrar = async (req, res) => {
     await usuario.save()
     console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
 
+    // ===========================================
+    // LÓGICA DE FILA / RODADA / INDICAÇÃO (inalterada)
+    // ===========================================
     let indicador = null,
       rodadaAdicionada = null,
       mensagemAuto = null,
@@ -297,6 +324,7 @@ exports.registrar = async (req, res) => {
       }
     }
 
+    // ---- Resposta ----
     const token = gerarToken(usuario._id)
     const response = {
       success: true,
@@ -305,6 +333,7 @@ exports.registrar = async (req, res) => {
         id: usuario._id,
         nome: usuario.nome,
         email: usuario.email,
+        cpf: usuario.cpf,
         codigoConvite: usuario.codigoConvite
       },
       entrouNaFila,
@@ -328,6 +357,8 @@ exports.registrar = async (req, res) => {
 
     console.log(`\n✅ REGISTRO CONCLUÍDO COM SUCESSO!`)
     console.log(`   Usuário: ${usuario.nome}`)
+    console.log(`   Email: ${usuario.email}`)
+    console.log(`   CPF: ${usuario.cpf}`)
     console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
     console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
@@ -336,60 +367,91 @@ exports.registrar = async (req, res) => {
     res.status(201).json(response)
   } catch (error) {
     console.error('❌ Erro no registro:', error)
-    res
-      .status(500)
-      .json({
+
+    // Tratamento de erro de duplicidade do Mongo (unique index)
+    if (error.code === 11000) {
+      const campo = Object.keys(error.keyPattern || {})[0] || 'campo'
+      return res.status(400).json({
         success: false,
-        error:
-          process.env.NODE_ENV === 'development'
-            ? error.message
-            : 'Erro interno no servidor'
+        error: `${campo === 'cpf' ? 'CPF' : 'Email'} já cadastrado`
       })
+    }
+
+    res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'development'
+          ? error.message
+          : 'Erro interno no servidor'
+    })
   }
 }
 
+// ===========================================
+// LOGIN — aceita email ou cpf + senha
+// ===========================================
 exports.login = async (req, res) => {
   try {
-    const { email, senha } = req.body
-    if (!email || !senha)
-      return res
-        .status(400)
-        .json({ success: false, error: 'Email e senha são obrigatórios' })
-    const usuario = await User.findOne({ email })
-    if (!usuario)
-      return res
-        .status(401)
-        .json({ success: false, error: 'Email ou senha inválidos' })
-    const senhaCorreta = await bcrypt.compare(senha, usuario.senha)
-    if (!senhaCorreta)
-      return res
-        .status(401)
-        .json({ success: false, error: 'Email ou senha inválidos' })
-    const token = gerarToken(usuario._id)
-    return res
-      .status(200)
-      .json({
-        success: true,
-        token,
-        usuario: {
-          id: usuario._id,
-          nome: usuario.nome,
-          email: usuario.email,
-          codigoConvite: usuario.codigoConvite,
-          role: usuario.role
-        }
+    const { email, cpf, senha } = req.body
+
+    if ((!email && !cpf) || !senha) {
+      return res.status(400).json({
+        success: false,
+        error: 'Informe email (ou CPF) e senha'
       })
+    }
+
+    // Monta a query: prioriza email se ambos forem enviados
+    let query = null
+    if (email) {
+      query = { email: String(email).trim().toLowerCase() }
+    } else {
+      const cpfLimpo = String(cpf).replace(/\D/g, '')
+      if (cpfLimpo.length !== 11) {
+        return res.status(400).json({ success: false, error: 'CPF inválido' })
+      }
+      query = { cpf: cpfLimpo }
+    }
+
+    const usuario = await User.findOne(query)
+    if (!usuario) {
+      return res
+        .status(401)
+        .json({ success: false, error: 'Credenciais inválidas' })
+    }
+
+    const senhaCorreta = await bcrypt.compare(senha, usuario.senha)
+    if (!senhaCorreta) {
+      return res
+        .status(401)
+        .json({ success: false, error: 'Credenciais inválidas' })
+    }
+
+    const token = gerarToken(usuario._id)
+    return res.status(200).json({
+      success: true,
+      token,
+      usuario: {
+        id: usuario._id,
+        nome: usuario.nome,
+        email: usuario.email,
+        cpf: usuario.cpf,
+        codigoConvite: usuario.codigoConvite,
+        role: usuario.role
+      }
+    })
   } catch (error) {
     console.error('Erro no login:', error)
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error: 'Erro interno no servidor. Tente novamente mais tarde.'
-      })
+    return res.status(500).json({
+      success: false,
+      error: 'Erro interno no servidor. Tente novamente mais tarde.'
+    })
   }
 }
 
+// ===========================================
+// GET ME (inalterado)
+// ===========================================
 exports.getMe = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId)
@@ -420,18 +482,19 @@ exports.getMe = async (req, res) => {
     res.json({ success: true, data: usuarioObj })
   } catch (error) {
     console.error('Erro no getMe:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error:
-          process.env.NODE_ENV === 'development'
-            ? error.message
-            : 'Erro interno no servidor'
-      })
+    res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'development'
+          ? error.message
+          : 'Erro interno no servidor'
+    })
   }
 }
 
+// ===========================================
+// FORGOT PASSWORD
+// ===========================================
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body
@@ -439,14 +502,14 @@ exports.forgotPassword = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, error: 'Email é obrigatório' })
-    const usuario = await User.findOne({ email })
+    const usuario = await User.findOne({
+      email: String(email).trim().toLowerCase()
+    })
     if (!usuario)
-      return res
-        .status(200)
-        .json({
-          success: true,
-          message: 'Se o email existir, enviaremos um link de recuperação'
-        })
+      return res.status(200).json({
+        success: true,
+        message: 'Se o email existir, enviaremos um link de recuperação'
+      })
     const token = crypto.randomBytes(32).toString('hex')
     const expires = new Date()
     expires.setHours(expires.getHours() + 1)
@@ -471,15 +534,16 @@ exports.forgotPassword = async (req, res) => {
     })
   } catch (error) {
     console.error('Erro no forgotPassword:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: 'Erro ao enviar email de recuperação. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao enviar email de recuperação. Tente novamente.'
+    })
   }
 }
 
+// ===========================================
+// RESET PASSWORD — agora só valida tamanho mínimo
+// ===========================================
 exports.resetPassword = async (req, res) => {
   try {
     const { token, senha } = req.body
@@ -487,39 +551,24 @@ exports.resetPassword = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, error: 'Token e nova senha são obrigatórios' })
+
+    // ✅ Senha: apenas tamanho mínimo (sem exigir maiúscula/número)
     if (senha.length < 6)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'A senha deve ter pelo menos 6 caracteres'
-        })
-    if (!/[A-Z]/.test(senha))
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'A senha deve conter pelo menos uma letra maiúscula'
-        })
-    if (!/[0-9]/.test(senha))
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: 'A senha deve conter pelo menos um número'
-        })
+      return res.status(400).json({
+        success: false,
+        error: 'A senha deve ter pelo menos 6 caracteres'
+      })
+
     const usuario = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: new Date() }
     })
     if (!usuario)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error:
-            'Token inválido ou expirado. Solicite um novo link de recuperação.'
-        })
+      return res.status(400).json({
+        success: false,
+        error:
+          'Token inválido ou expirado. Solicite um novo link de recuperação.'
+      })
     const salt = await bcrypt.genSalt(10)
     const senhaHash = await bcrypt.hash(senha, salt)
     usuario.senha = senhaHash
@@ -529,11 +578,9 @@ exports.resetPassword = async (req, res) => {
     res.json({ success: true, message: 'Senha redefinida com sucesso' })
   } catch (error) {
     console.error('Erro no resetPassword:', error)
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: 'Erro ao redefinir senha. Tente novamente.'
-      })
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao redefinir senha. Tente novamente.'
+    })
   }
 }

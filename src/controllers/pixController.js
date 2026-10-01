@@ -1,4 +1,7 @@
-const { abacateV1, abacateV2 } = require('../config/abacate')
+// ===========================================
+// pixController.js — Migrado 100% para AbacatePay V2
+// ===========================================
+const { abacateV2 } = require('../config/abacate')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
 const User = require('../models/User')
@@ -20,8 +23,41 @@ function setRodadaService (service) {
   console.log('✅ RodadaService injetado no pixController')
 }
 
-const VALOR_VERMELHO = 150
+const { VALOR_VERMELHO, TAXA_PIX } = require('../config/constantes')
 const pagamentosProcessados = new Map()
+
+// ===========================================
+// AUXILIAR: montar payload V2 (transparent create)
+// ⚠️ NÃO enviamos `customer` porque o cadastro atual
+// não coleta cellphone, e a AbacatePay V2 exige
+// name + taxId + email + cellphone TODOS juntos.
+// ===========================================
+function montarPayloadPixV2 (transacao) {
+  const valorCentavos = Math.round(VALOR_VERMELHO * 100)
+
+  return {
+    method: 'PIX',
+    data: {
+      amount: valorCentavos,
+      description: `Giro Premiado - ${transacao.pagador?.nome || 'Usuário'}`,
+      expiresIn: 3600,
+      // ✅ externalId DIRETO em data (não dentro de metadata)
+      externalId: transacao._id.toString()
+    }
+  }
+}
+
+// ===========================================
+// AUXILIAR: consultar status no endpoint CORRETO da V2
+// ===========================================
+async function consultarStatusTransparenteV2 (cobrancaId) {
+  // ✅ /v2/transparents/check?id=... é o endpoint correto
+  // para consultar status de checkout transparente (PIX/Boleto).
+  const response = await abacateV2.get('/v2/transparents/check', {
+    params: { id: cobrancaId }
+  })
+  return response.data?.data
+}
 
 // ===========================================
 // AUXILIAR: processar pagamento com controle de duplicidade
@@ -221,7 +257,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 }
 
 // ===========================================
-// CRIAR COBRANÇA PIX (v1)
+// CRIAR COBRANÇA PIX (V2)
 // ===========================================
 const criarCobrancaPix = async (req, res) => {
   try {
@@ -232,7 +268,7 @@ const criarCobrancaPix = async (req, res) => {
         .json({ success: false, error: 'transacaoId é obrigatório' })
 
     const transacao = await Transacao.findById(transacaoId)
-      .populate('pagador', 'nome email')
+      .populate('pagador', 'nome email cpf')
       .populate('rodada', 'nome')
     if (!transacao)
       return res
@@ -248,14 +284,14 @@ const criarCobrancaPix = async (req, res) => {
         error: 'Transação expirada. Não é possível gerar novo PIX.'
       })
 
-    const valorCentavos = Math.round(VALOR_VERMELHO * 100)
-    const payload = {
-      amount: valorCentavos,
-      description: `Giro Premiado - ${transacao.pagador.nome}`,
-      expiresIn: 3600,
-      metadata: { externalId: transacao._id.toString() }
-    }
-    const response = await abacateV1.post('/v1/pixQrCode/create', payload)
+    const payload = montarPayloadPixV2(transacao)
+
+    console.log(
+      '📦 [criarCobrancaPix] Payload V2:',
+      JSON.stringify(payload, null, 2)
+    )
+
+    const response = await abacateV2.post('/v2/transparents/create', payload)
     const {
       id: cobrancaId,
       brCode,
@@ -269,7 +305,7 @@ const criarCobrancaPix = async (req, res) => {
       ...(transacao.metadata || {}),
       cobrancaCriadaEm: new Date().toISOString(),
       expiraEm: expiresAt,
-      tipo: 'pix_qrcode_v1',
+      tipo: 'pix_transparent_v2',
       renovacoes: 0,
       valorOriginal: VALOR_VERMELHO,
       qrCode: brCode,
@@ -310,17 +346,27 @@ const criarCobrancaPix = async (req, res) => {
       renovacoes: 0
     })
   } catch (error) {
-    console.error('❌ Erro ao criar QR Code PIX:', error)
+    const status = error.response?.status
+    const apiError = error.response?.data?.error || error.message
+    console.error('❌ Erro ao criar QR Code PIX (v2):', { status, apiError })
+
+    if (status === 401 || /invalid or inactive api key/i.test(apiError)) {
+      return res.status(503).json({
+        success: false,
+        error:
+          'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
+      })
+    }
+
     res.status(500).json({
       success: false,
-      error:
-        error.response?.data?.error || 'Erro ao gerar PIX. Tente novamente.'
+      error: apiError || 'Erro ao gerar PIX. Tente novamente.'
     })
   }
 }
 
 // ===========================================
-// VERIFICAR STATUS (v1)
+// VERIFICAR STATUS (V2) — usando /v2/transparents/check
 // ===========================================
 const verificarStatus = async (req, res) => {
   try {
@@ -351,21 +397,43 @@ const verificarStatus = async (req, res) => {
 
     if (transacao.cobrancaId && !expirado) {
       try {
-        const response = await abacateV1.get(`/v1/pixQrCode/check`, {
-          params: { id: transacao.cobrancaId }
-        })
-        const statusApi =
-          response.data.data?.status?.toUpperCase?.() ||
-          response.data.data?.status
-        if (
-          statusApi === 'PAID' ||
-          statusApi === 'COMPLETED' ||
-          statusApi === 'CONFIRMED'
-        ) {
+        // ✅ V2: endpoint correto para checkout transparente
+        const pixData = await consultarStatusTransparenteV2(
+          transacao.cobrancaId
+        )
+        const statusApi = pixData?.status?.toUpperCase?.()
+
+        console.log(
+          `[verificarStatus] cobrancaId=${transacao.cobrancaId} → status=${statusApi}`
+        )
+
+        // V2 retorna "PAID" quando o PIX é confirmado
+        if (statusApi === 'PAID') {
           await processarPagamentoComControle(transacaoId, 'verificarStatus')
+        } else if (statusApi === 'EXPIRED' || statusApi === 'CANCELLED') {
+          // Marca como expirada se ainda não estiver
+          if (transacao.status === 'pendente') {
+            transacao.status = 'cancelada_expirada'
+            await transacao.save()
+            console.log(
+              `⚠️ [verificarStatus] Transação ${transacaoId} marcada como ${statusApi}`
+            )
+          }
         }
       } catch (apiError) {
-        console.error('❌ Erro ao consultar status:', apiError.message)
+        const status = apiError.response?.status
+        if (status === 400) {
+          // "Transaction not found" — geralmente payload antigo/teste. Ignora.
+          console.warn(
+            `⚠️ [verificarStatus] AbacatePay não achou a transação (400):`,
+            apiError.response?.data?.error
+          )
+        } else {
+          console.error(
+            '❌ Erro ao consultar status (v2):',
+            apiError.response?.data || apiError.message
+          )
+        }
       }
     }
 
@@ -374,6 +442,7 @@ const verificarStatus = async (req, res) => {
       (transacaoAtualizada.metadata?.expiraEm &&
         new Date() > new Date(transacaoAtualizada.metadata.expiraEm)) ||
       transacaoAtualizada.status === 'cancelada_expirada'
+
     res.json({
       success: true,
       status: transacaoAtualizada.status,
@@ -388,7 +457,7 @@ const verificarStatus = async (req, res) => {
 }
 
 // ===========================================
-// RENOVAR COBRANÇA (v1)
+// RENOVAR COBRANÇA (V2)
 // ===========================================
 const renovarCobrancaPix = async (req, res) => {
   try {
@@ -400,7 +469,7 @@ const renovarCobrancaPix = async (req, res) => {
 
     const transacao = await Transacao.findById(transacaoId).populate(
       'pagador',
-      'nome email'
+      'nome email cpf'
     )
     if (!transacao)
       return res
@@ -422,14 +491,14 @@ const renovarCobrancaPix = async (req, res) => {
         error: 'Você não está mais na rodada. Renovação não permitida.'
       })
 
-    const valorCentavos = Math.round(VALOR_VERMELHO * 100)
-    const payload = {
-      amount: valorCentavos,
-      description: `Giro Premiado - ${transacao.pagador.nome}`,
-      expiresIn: 3600,
-      metadata: { externalId: transacao._id.toString() }
-    }
-    const response = await abacateV1.post('/v1/pixQrCode/create', payload)
+    const payload = montarPayloadPixV2(transacao)
+
+    console.log(
+      '📦 [renovarCobrancaPix] Payload V2:',
+      JSON.stringify(payload, null, 2)
+    )
+
+    const response = await abacateV2.post('/v2/transparents/create', payload)
     const {
       id: novaCobrancaId,
       brCode,
@@ -471,11 +540,21 @@ const renovarCobrancaPix = async (req, res) => {
       renovacoes
     })
   } catch (error) {
-    console.error('❌ Erro ao renovar PIX:', error)
+    const status = error.response?.status
+    const apiError = error.response?.data?.error || error.message
+    console.error('❌ Erro ao renovar PIX (v2):', { status, apiError })
+
+    if (status === 401 || /invalid or inactive api key/i.test(apiError)) {
+      return res.status(503).json({
+        success: false,
+        error:
+          'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
+      })
+    }
+
     res.status(500).json({
       success: false,
-      error:
-        error.response?.data?.error || 'Erro ao renovar PIX. Tente novamente.'
+      error: apiError || 'Erro ao renovar PIX. Tente novamente.'
     })
   }
 }
@@ -517,7 +596,6 @@ const cancelarExpirado = async (req, res) => {
     console.log(
       `[CANCELAR-EXPIRADO] Rodada encontrada: ${rodada.nome} (${rodada._id})`
     )
-    const usuarioIdStr = usuarioId.toString()
 
     const updateResult = await Rodada.updateOne(
       { _id: rodada._id },
@@ -645,10 +723,8 @@ async function processarTransacoesExpiradas () {
 }
 
 // ===========================================
-// ENVIAR PIX (PAYOUT) PARA SAQUE DO VERDE (v2)
+// ENVIAR PIX (PAYOUT) PARA SAQUE DO VERDE (V2)
 // ===========================================
-const TAXA_PIX = parseFloat(process.env.ABACATE_PIX_FEE) || 0.8 // valor fixo em reais
-
 const enviarPixSaque = async (
   valor,
   chavePix,
@@ -660,7 +736,6 @@ const enviarPixSaque = async (
     throw new Error('Chave PIX ou tipo não informados')
   }
 
-  // Soma a taxa ao valor solicitado para que o usuário receba o valor líquido integral
   const valorComTaxa = valor + TAXA_PIX
   const valorCentavos = Math.round(valorComTaxa * 100)
 

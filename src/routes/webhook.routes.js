@@ -8,97 +8,170 @@ const WEBHOOK_SECRET_QUERY = process.env.WEBHOOK_SECRET_QUERY // fallback opcion
 
 const webhooksProcessados = new Map()
 
+// ===========================================
+// EXTRAI EXTERNALID DE DIFERENTES FORMATOS DE PAYLOAD
+// ===========================================
 function extrairExternalId (event) {
-  if (event.data?.pixQrCode?.metadata?.externalId)
-    return event.data.pixQrCode.metadata.externalId
-  if (event.data?.externalId) return event.data.externalId
-  if (event.data?.metadata?.externalId) return event.data.metadata.externalId
-  if (event.data?.checkout?.metadata?.externalId)
-    return event.data.checkout.metadata.externalId
-  if (event.data?.transparent?.metadata?.externalId)
-    return event.data.transparent.metadata.externalId
+  if (!event || !event.data) return null
+  const d = event.data
+
+  // Formato V2 transparent (transparent.completed)
+  if (d.externalId) return d.externalId
+  if (d.transparent?.externalId) return d.transparent.externalId
+  if (d.transparent?.metadata?.externalId)
+    return d.transparent.metadata.externalId
+
+  // Formatos antigos / alternativos
+  if (d.metadata?.externalId) return d.metadata.externalId
+  if (d.pixQrCode?.metadata?.externalId) return d.pixQrCode.metadata.externalId
+  if (d.checkout?.metadata?.externalId) return d.checkout.metadata.externalId
+
   return null
 }
 
+// ===========================================
+// VALIDA ASSINATURA (opcional em dev)
+// ===========================================
+function validarAssinatura (req) {
+  // Se não tem secret configurado, pula (modo dev)
+  if (!WEBHOOK_SECRET_HMAC) {
+    console.warn(
+      '⚠️ [WEBHOOK] WEBHOOK_SECRET_HMAC não configurado — validação HMAC ignorada (DEV)'
+    )
+    return { valido: true, motivo: 'sem_secret_dev' }
+  }
+
+  // Aceita header em diferentes nomes (AbacatePay usa X-Webhook-Signature na V2)
+  const signature =
+    req.headers['x-webhook-signature'] ||
+    req.headers['x-signature'] ||
+    req.headers['x-hub-signature']
+
+  if (!signature) {
+    return {
+      valido: false,
+      motivo: 'header_assinatura_ausente',
+      headersRecebidos: Object.keys(req.headers).filter(h => h.includes('sign'))
+    }
+  }
+
+  const payload = JSON.stringify(req.body)
+  const expected = crypto
+    .createHmac('sha256', WEBHOOK_SECRET_HMAC)
+    .update(payload)
+    .digest('hex')
+
+  // Normaliza: pode vir em base64 ou hex, com/sem prefixo "sha256="
+  const sigLimpa = signature.replace(/^sha256=/, '').trim()
+  const ok =
+    sigLimpa === expected ||
+    sigLimpa ===
+      crypto
+        .createHmac('sha256', WEBHOOK_SECRET_HMAC)
+        .update(payload)
+        .digest('base64')
+
+  return { valido: ok, motivo: ok ? 'ok' : 'assinatura_invalida' }
+}
+
+// ===========================================
+// WEBHOOK PIX
+// ===========================================
 router.post('/pix', async (req, res) => {
   try {
-    // 1. Validação HMAC (obrigatória)
-    if (!WEBHOOK_SECRET_HMAC) {
-      console.error('❌ Webhook rejeitado: HMAC secret não configurado')
-      return res.status(500).send('Erro de configuração')
-    }
-
-    const signature = req.headers['x-signature']
-    if (!signature) {
-      console.error('❌ Webhook rejeitado: cabeçalho X-Signature ausente')
+    // 1. Validação HMAC (opcional se WEBHOOK_SECRET_HMAC não estiver configurado)
+    const assinatura = validarAssinatura(req)
+    if (!assinatura.valido) {
+      console.error(
+        `❌ [WEBHOOK] Rejeitado: ${assinatura.motivo}`,
+        assinatura.headersRecebidos || ''
+      )
       return res.status(401).send('Unauthorized')
     }
 
-    const payload = JSON.stringify(req.body)
-    const expected = crypto
-      .createHmac('sha256', WEBHOOK_SECRET_HMAC)
-      .update(payload)
-      .digest('hex')
-    if (signature !== expected) {
-      console.error('❌ Webhook rejeitado: assinatura HMAC inválida')
-      return res.status(401).send('Unauthorized')
-    }
-
-    // 2. Validação do secret via query string (fallback opcional, menos seguro)
+    // 2. Validação do secret via query string (fallback opcional)
     const querySecret = req.query.webhookSecret
     if (WEBHOOK_SECRET_QUERY && querySecret !== WEBHOOK_SECRET_QUERY) {
-      console.error('❌ Webhook rejeitado: secret da URL inválido')
+      console.error('❌ [WEBHOOK] Rejeitado: secret da URL inválido')
       return res.status(401).send('Unauthorized')
     }
 
     // 3. Controle de duplicidade (cache em memória)
-    const webhookId = req.body.id || `${Date.now()}_${Math.random()}`
-    if (webhooksProcessados.has(`webhook_${webhookId}`)) {
-      console.log(`⚠️ Webhook ${webhookId} já foi processado. Ignorando.`)
+    const webhookId =
+      req.body?.id || req.body?.data?.id || `${Date.now()}_${Math.random()}`
+    const cacheKey = `webhook_${webhookId}`
+    if (webhooksProcessados.has(cacheKey)) {
+      console.log(`⚠️ [WEBHOOK] ${webhookId} já foi processado. Ignorando.`)
       return res.status(200).send('Webhook já processado')
     }
-    webhooksProcessados.set(`webhook_${webhookId}`, Date.now())
-    setTimeout(
-      () => webhooksProcessados.delete(`webhook_${webhookId}`),
-      5 * 60 * 1000
-    )
+    webhooksProcessados.set(cacheKey, Date.now())
+    setTimeout(() => webhooksProcessados.delete(cacheKey), 5 * 60 * 1000)
 
-    console.log(`📡 Webhook recebido: event=${req.body.event}, id=${webhookId}`)
-
+    // 4. Log estruturado do evento recebido
     const event = req.body
-    if (!event || !event.event) return res.status(400).send('Evento inválido')
-
-    const externalId = extrairExternalId(event)
-    if (!externalId) {
-      console.log(`⏩ Evento ${event.event} sem externalId - ignorado`)
-      return res.status(200).send('Evento ignorado')
+    const eventName = event?.event || event?.type || 'desconhecido'
+    console.log(
+      `📡 [WEBHOOK] Recebido: event=${eventName}, id=${webhookId}, status=${
+        event?.data?.status || 'n/a'
+      }`
+    )
+    if (process.env.NODE_ENV === 'development') {
+      console.log(
+        '📦 Payload completo:',
+        JSON.stringify(event, null, 2).substring(0, 2000)
+      )
     }
 
-    console.log(
-      `🔍 ExternalId extraído: ${externalId} do evento ${event.event}`
-    )
+    if (!event || (!event.event && !event.type)) {
+      console.warn(
+        '⚠️ [WEBHOOK] Payload sem campo `event` ou `type`. Ignorando.'
+      )
+      return res.status(200).send('Evento inválido')
+    }
 
+    // 5. Extração do externalId (nosso transacao._id)
+    const externalId = extrairExternalId(event)
+    if (!externalId) {
+      console.log(`⏩ [WEBHOOK] Evento ${eventName} sem externalId - ignorado`)
+      return res.status(200).send('Evento sem externalId')
+    }
+
+    console.log(`🔍 [WEBHOOK] externalId extraído: ${externalId}`)
+
+    // 6. Processa apenas eventos de pagamento confirmado
     const eventosPagamento = [
+      'transparent.completed',
       'billing.paid',
       'qr_code.paid',
-      'checkout.completed',
-      'transparent.completed'
+      'checkout.completed'
     ]
 
-    if (eventosPagamento.includes(event.event)) {
+    // Também aceita quando o status do data indica pago, mesmo se o evento não bater
+    const statusPago =
+      event.data?.status?.toUpperCase?.() === 'PAID' ||
+      event.data?.status === 'paid'
+
+    if (eventosPagamento.includes(eventName) || statusPago) {
+      console.log(
+        `💰 [WEBHOOK] Processando pagamento para transação ${externalId}`
+      )
       const result = await pixController.processarPagamentoComControle(
         externalId,
         'webhook'
       )
-      console.log(`📊 Resultado processamento: ${result.message}`)
-      res.send('OK')
-    } else {
-      console.log(`⏩ Evento ignorado: ${event.event}`)
-      res.status(200).send('Evento ignorado')
+      console.log(`📊 [WEBHOOK] Resultado: ${result.message}`)
+      return res.status(200).send('OK')
     }
+
+    console.log(
+      `⏩ [WEBHOOK] Evento ${eventName} ignorado (não é de pagamento)`
+    )
+    return res.status(200).send('Evento ignorado')
   } catch (error) {
-    console.error('❌ Erro no webhook PIX:', error)
-    res.status(500).send('Erro interno')
+    console.error('❌ [WEBHOOK] Erro no processamento:', error)
+    // Retorna 200 para a AbacatePay não ficar retentando infinitamente
+    // Se quiser retry, retorne 500
+    return res.status(200).send('Erro interno (não retentar)')
   }
 })
 

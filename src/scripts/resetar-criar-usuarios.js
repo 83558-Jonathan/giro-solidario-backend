@@ -2,6 +2,15 @@ const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 require('dotenv').config()
 
+const {
+  VALOR_VERMELHO,
+  PREMIO_VERDE,
+  TOTAL_VERMELHOS,
+  TOTAL_ARRECADADO,
+  MARGEM_PLATAFORMA,
+  TAXA_PIX
+} = require('../config/constantes')
+
 const colors = {
   reset: '\x1b[0m',
   green: '\x1b[32m',
@@ -38,9 +47,9 @@ async function resetarECriarUsuarios () {
 
     await db.createCollection('users')
     await db.createCollection('rodadas')
-    await db.createCollection('transacoes')
-    await db.createCollection('notificacoes')
-    await db.createCollection('logs')
+    await db.createCollection('transacaos')
+    await db.createCollection('solicitacaosaques')
+    await db.createCollection('chatmessages')
     await db.createCollection('configuracoes')
 
     console.log(`   ✅ 6 collections criadas`)
@@ -51,7 +60,7 @@ async function resetarECriarUsuarios () {
     await db.collection('users').createIndex({ email: 1 }, { unique: true })
     await db.collection('users').createIndex({ cpf: 1 }, { unique: true })
     await db.collection('rodadas').createIndex({ numero: 1 }, { unique: true })
-    await db.collection('transacoes').createIndex({ createdAt: -1 })
+    await db.collection('transacaos').createIndex({ createdAt: -1 })
 
     console.log(`   ✅ Índices criados`)
 
@@ -99,6 +108,9 @@ async function resetarECriarUsuarios () {
       role: 'admin',
       status: 'ativo',
       codigoConvite: 'CONVITE-ADMIN',
+      saldoPremio: 0,
+      totalGanho: 0,
+      aguardandoVermelho: false,
       createdAt: new Date(),
       updatedAt: new Date()
     }
@@ -120,6 +132,9 @@ async function resetarECriarUsuarios () {
         role: 'user',
         status: 'ativo',
         codigoConvite: 'CONVITE-' + u.nome.split(' ')[0].toUpperCase(),
+        saldoPremio: 0,
+        totalGanho: 0,
+        aguardandoVermelho: false,
         createdAt: new Date(),
         updatedAt: new Date()
       })
@@ -142,17 +157,19 @@ async function resetarECriarUsuarios () {
         valor: {
           nome: 'Giro Premiado',
           versao: '1.0.0',
-          valorDeposito: 150,
-          valorRecebimento: 1000,
+          valorDeposito: VALOR_VERMELHO,
+          valorRecebimento: PREMIO_VERDE,
           totalParticipantes: 15,
-          taxa: 0.1
+          totalVermelhos: TOTAL_VERMELHOS,
+          totalArrecadado: TOTAL_ARRECADADO,
+          margemPlataforma: MARGEM_PLATAFORMA
         }
       },
       {
         chave: 'pix',
         valor: {
           tiposChave: ['cpf', 'email', 'telefone', 'aleatoria'],
-          taxa: 0.1
+          taxaSaque: TAXA_PIX
         }
       },
       {
@@ -189,11 +206,13 @@ async function resetarECriarUsuarios () {
         nome: 'Rodada #1',
         status: 'aguardando',
         participantes: [],
+        verde: null,
         pretos: [],
         azuis: [],
         vermelhos: [],
         totalDepositosConfirmados: 0,
         todosDepositaram: false,
+        premioVerdePago: false,
         historicoMovimentacoes: [],
         rodadasGeradas: [],
         createdAt: new Date(),
@@ -258,10 +277,60 @@ async function resetarECriarUsuarios () {
         }
       )
 
-      console.log(`\n   🟢 Verde: ${verdeNome}`)
+      // 7.1 CRIAR TRANSAÇÕES PARA OS 8 VERMELHOS
+      console.log(
+        `\n${colors.cyan}💸 Criando ${TOTAL_VERMELHOS} transações de R$ ${VALOR_VERMELHO}...${colors.reset}`
+      )
+
+      for (const vermelhoId of vermelhosIds) {
+        const usuarioVermelho = await db
+          .collection('users')
+          .findOne({ _id: vermelhoId })
+
+        const transacao = {
+          tipo: 'deposito',
+          pagador: vermelhoId,
+          recebedor: verdeId,
+          valor: VALOR_VERMELHO,
+          valorPago: VALOR_VERMELHO,
+          rodada: result.insertedId,
+          status: 'pendente',
+          metadata: {},
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+
+        const transacaoResult = await db
+          .collection('transacaos')
+          .insertOne(transacao)
+
+        // Associar transação ao participante
+        await db.collection('rodadas').updateOne(
+          {
+            _id: result.insertedId,
+            'participantes.usuario': vermelhoId
+          },
+          {
+            $set: {
+              'participantes.$.transacaoId': transacaoResult.insertedId
+            }
+          }
+        )
+
+        console.log(
+          `   ✅ ${usuarioVermelho?.nome || 'N/A'}: R$ ${VALOR_VERMELHO}`
+        )
+      }
+
+      console.log(`\n   🟢 Verde: ${verdeNome} (receberá R$ ${PREMIO_VERDE})`)
       console.log(`   ⚫ Pretos: 2`)
       console.log(`   🔵 Azuis: 4`)
-      console.log(`   🔴 Vermelhos: 8`)
+      console.log(
+        `   🔴 Vermelhos: ${TOTAL_VERMELHOS} (cada um paga R$ ${VALOR_VERMELHO})`
+      )
+      console.log(`\n   💰 Total arrecadado: R$ ${TOTAL_ARRECADADO}`)
+      console.log(`   🎁 Prêmio do verde: R$ ${PREMIO_VERDE}`)
+      console.log(`   📈 Margem da plataforma: R$ ${MARGEM_PLATAFORMA}`)
       console.log(`\n   ✅ Rodada #1 iniciada com sucesso!`)
     } else {
       console.log(
@@ -282,6 +351,12 @@ async function resetarECriarUsuarios () {
     console.log(`   👥 Usuários: 15`)
     console.log(`   🎯 Rodadas: 1 (em andamento)`)
     console.log(`   🟢 Verde sorteado: ${verdeNome}`)
+    console.log(`\n${colors.cyan}💰 CONFIGURAÇÃO FINANCEIRA:${colors.reset}`)
+    console.log(`   🔴 Cada vermelho paga: R$ ${VALOR_VERMELHO}`)
+    console.log(`   🟢 Verde recebe: R$ ${PREMIO_VERDE}`)
+    console.log(`   💰 Total arrecadado por rodada: R$ ${TOTAL_ARRECADADO}`)
+    console.log(`   📈 Margem da plataforma: R$ ${MARGEM_PLATAFORMA}`)
+    console.log(`   💳 Taxa de saque (PIX): R$ ${TAXA_PIX}`)
   } catch (error) {
     console.error(`${colors.red}❌ ERRO:${colors.reset}`, error.message)
     console.error(error.stack)

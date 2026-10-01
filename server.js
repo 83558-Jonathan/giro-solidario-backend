@@ -26,7 +26,7 @@ const escapeHtml = require('escape-html')
 // 🔧 MOVENDO IMPORTAÇÕES PARA O TOPO (evita recarregamento)
 const RodadaService = require('./src/services/rodadaService')
 const Transacao = require('./src/models/Transacao')
-const { abacateV1 } = require('./src/config/abacate')
+const { abacateV2 } = require('./src/config/abacate') // ✅ Migrado para V2
 const {
   processarPagamentoComControle
 } = require('./src/controllers/pixController')
@@ -54,7 +54,9 @@ setInterval(async () => {
   }
 }, 10000)
 
-// Job periódico para verificar transações pendentes (fallback)
+// ===========================================
+// Job periódico para verificar transações pendentes (V2 - fallback)
+// ===========================================
 setInterval(async () => {
   try {
     const transacoesPendentes = await Transacao.find({
@@ -71,18 +73,15 @@ setInterval(async () => {
 
     for (const transacao of transacoesPendentes) {
       try {
-        const response = await abacateV1.get(`/v1/pixQrCode/check`, {
+        // ✅ V2: endpoint correto para checkout transparente
+        const response = await abacateV2.get('/v2/transparents/check', {
           params: { id: transacao.cobrancaId }
         })
         const statusApi =
-          response.data.data?.status?.toUpperCase?.() ||
-          response.data.data?.status
+          response.data?.data?.status?.toUpperCase?.() ||
+          response.data?.data?.status
 
-        if (
-          statusApi === 'PAID' ||
-          statusApi === 'COMPLETED' ||
-          statusApi === 'CONFIRMED'
-        ) {
+        if (statusApi === 'PAID') {
           console.log(
             `[JOB-PIX] ✅ Pagamento confirmado para transação ${transacao._id}`
           )
@@ -90,20 +89,40 @@ setInterval(async () => {
             transacao._id.toString(),
             'job-periodico'
           )
-        } else if (statusApi === 'EXPIRED') {
-          console.log(`[JOB-PIX] ⏰ Transação ${transacao._id} expirada`)
+        } else if (statusApi === 'EXPIRED' || statusApi === 'CANCELLED') {
+          console.log(`[JOB-PIX] ⏰ Transação ${transacao._id} ${statusApi}`)
+          // Marca como expirada para não ficar verificando eternamente
+          await Transacao.updateOne(
+            { _id: transacao._id, status: 'pendente' },
+            { $set: { status: 'cancelada_expirada' } }
+          )
         }
       } catch (err) {
-        console.error(
-          `[JOB-PIX] Erro ao verificar transação ${transacao._id}:`,
-          err.message
-        )
+        // Ignora 400 (transação antiga/teste que a AbacatePay não reconhece)
+        if (err.response?.status === 400) {
+          console.warn(
+            `[JOB-PIX] Transação ${transacao._id} não encontrada na AbacatePay — marcando como cancelada`
+          )
+          await Transacao.updateOne(
+            { _id: transacao._id, status: 'pendente' },
+            { $set: { status: 'cancelada_expirada' } }
+          )
+        } else if (err.response?.status === 401) {
+          console.error(
+            '[JOB-PIX] ❌ Chave de API V2 inválida. Verifique ABACATE_API_KEY_V2.'
+          )
+        } else {
+          console.error(
+            `[JOB-PIX] Erro ao verificar transação ${transacao._id}:`,
+            err.response?.data?.error || err.message
+          )
+        }
       }
     }
   } catch (error) {
     console.error('[JOB-PIX] Erro no job de verificação periódica:', error)
   }
-}, 10000)
+}, 30000)
 
 // ===========================================
 // TRUST PROXY (IP real via Cloudflare)
@@ -117,7 +136,42 @@ const getRealIp = req => {
 }
 
 // ===========================================
-// MIDDLEWARE DE LOG MELHORADO (antes de qualquer processamento)
+// CORS (deve vir antes dos parsers para OPTIONS)
+// ===========================================
+const allowedOrigins = [
+  'https://giropremiados.com.br',
+  'https://www.giropremiados.com.br',
+  'http://localhost:3000',
+  'http://localhost:5001'
+]
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
+      if (allowedOrigins.includes(origin)) return callback(null, true)
+      console.log(`❌ CORS bloqueado para origem: ${origin}`)
+      callback(new Error('Not allowed by CORS'))
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept'
+    ]
+  })
+)
+
+// ===========================================
+// PARSERS DE BODY (necessários antes do log com hasBody)
+// ===========================================
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// ===========================================
+// MIDDLEWARE DE LOG (✅ AGORA DEPOIS DO express.json)
 // ===========================================
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
@@ -125,10 +179,9 @@ if (process.env.NODE_ENV !== 'production') {
       method: req.method,
       path: req.path,
       ip: getRealIp(req),
-      hasBody: !!req.body,
+      hasBody: !!(req.body && Object.keys(req.body).length > 0),
       contentType: req.headers['content-type']
     }
-    // Evita poluir o console com OPTIONS
     if (req.method === 'OPTIONS') {
       console.log(`🔍 [OPTIONS] ${req.path} - IP: ${logObj.ip}`)
     } else {
@@ -138,8 +191,6 @@ if (process.env.NODE_ENV !== 'production') {
     }
     next()
   })
-} else {
-  app.use((req, res, next) => next())
 }
 
 // ===========================================
@@ -173,45 +224,10 @@ app.use((req, res, next) => {
 })
 
 // ===========================================
-// CORS (deve vir antes dos parsers para OPTIONS)
-// ===========================================
-const allowedOrigins = [
-  'https://giropremiados.com.br',
-  'https://www.giropremiados.com.br',
-  'http://localhost:3000',
-  'http://localhost:5001'
-]
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true)
-      if (allowedOrigins.includes(origin)) return callback(null, true)
-      console.log(`❌ CORS bloqueado para origem: ${origin}`)
-      callback(new Error('Not allowed by CORS'))
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Requested-With',
-      'Accept'
-    ]
-  })
-)
-
-// ===========================================
-// PARSERS DE BODY (necessários antes de qualquer middleware que use req.body)
-// ===========================================
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
-
-// ===========================================
-// 🛡️ SANITIZAÇÃO MANUAL (agora com verificação segura)
+// 🛡️ SANITIZAÇÃO MANUAL
 // ===========================================
 
-// 1. Remove operadores $ (NoSQL injection) – seguro para req.body undefined
+// 1. Remove operadores $ (NoSQL injection)
 app.use((req, res, next) => {
   const sanitizeObject = obj => {
     if (!obj || typeof obj !== 'object') return
@@ -242,7 +258,6 @@ app.use((req, res, next) => {
     'mensagem',
     'motivo'
   ]
-  // Só processa se o body existir (evita erro em OPTIONS)
   if (req.body) {
     for (const field of fieldsToSanitize) {
       if (req.body[field]) req.body[field] = sanitizeString(req.body[field])
@@ -256,7 +271,7 @@ app.use((req, res, next) => {
   next()
 })
 
-// 3. Proteção contra parameter pollution (objetos muito aninhados)
+// 3. Proteção contra parameter pollution
 app.use((req, res, next) => {
   const checkDepth = (obj, depth = 0) => {
     if (depth > 5) throw new Error('Objeto muito aninhado')
@@ -300,11 +315,11 @@ app.use((req, res, next) => {
 })
 
 // ===========================================
-// RATE LIMITING (proteção contra DDoS e brute force)
+// RATE LIMITING
 // ===========================================
 const globalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 1500, // triplicado (antes 500)
+  max: 1500,
   message: {
     success: false,
     error: 'Muitas requisições. Tente novamente mais tarde.'
@@ -315,7 +330,7 @@ const globalLimiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
-  max: 300, // triplicado (antes 100)
+  max: 300,
   skipSuccessfulRequests: true,
   message: {
     success: false,
@@ -325,7 +340,7 @@ const loginLimiter = rateLimit({
 
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 300, // triplicado (antes 100)
+  max: 300,
   message: {
     success: false,
     error: 'Muitas tentativas de registro. Tente novamente em 1 hora.'
@@ -334,7 +349,7 @@ const registerLimiter = rateLimit({
 
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 150, // triplicado (antes 50)
+  max: 150,
   message: {
     success: false,
     error: 'Muitas solicitações. Tente novamente em 1 hora.'
@@ -343,7 +358,7 @@ const forgotPasswordLimiter = rateLimit({
 
 const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 600, // triplicado (antes 200)
+  max: 600,
   message: { success: false, error: 'Muitas requisições para o webhook.' },
   skip: req => {
     const trustedIps = process.env.TRUSTED_IPS
@@ -355,41 +370,40 @@ const webhookLimiter = rateLimit({
 
 const chatHistoryLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 90, // triplicado (antes 30)
+  max: 90,
   message: { error: 'Muitas requisições ao histórico. Aguarde um momento.' }
 })
 
 const mandalaLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 90, // triplicado (antes 30)
+  max: 90,
   message: { error: 'Muitas requisições à mandala. Aguarde um momento.' }
 })
 
 const rodadasListLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 60, // triplicado (antes 20)
+  max: 60,
   message: { error: 'Muitas requisições. Aguarde um pouco.' }
 })
 
 const usersListLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 60, // triplicado (antes 20)
+  max: 60,
   message: { error: 'Muitas requisições. Aguarde um pouco.' }
 })
 
 const saqueLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 15, // triplicado (antes 5)
+  max: 15,
   message: { error: 'Muitas solicitações de saque. Tente mais tarde.' }
 })
 
 const jogarNovamenteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 9, // triplicado (antes 3)
+  max: 9,
   message: { error: 'Muitas tentativas de reentrada. Aguarde.' }
 })
 
-// Aplicar rate limiters
 app.use('/api/', globalLimiter)
 app.use('/api/auth/login', loginLimiter)
 app.use('/api/auth/registrar', registerLimiter)
@@ -400,7 +414,6 @@ app.use('/api/users', usersListLimiter)
 app.use('/api/rodadas/:rodadaId/sacar-premio', saqueLimiter)
 app.use('/api/rodadas/jogar-novamente', jogarNovamenteLimiter)
 
-// Log de tentativas de acesso admin
 app.use('/api/admin', (req, res, next) => {
   if (req.usuario?.role !== 'admin') {
     console.warn(
@@ -442,7 +455,7 @@ mongoose
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
 
 // ===========================================
-// SOCKET.IO (CHAT) – CORREÇÃO ROBUSTA
+// SOCKET.IO (CHAT)
 // ===========================================
 const io = socketIo(server, {
   cors: {
@@ -452,12 +465,10 @@ const io = socketIo(server, {
   }
 })
 
-// Inicializa o io nos controllers/services
 const pixController = require('./src/controllers/pixController')
 pixController.initializeIo(io)
 RodadaService.initializeIo(io)
 
-// Middleware de autenticação – COM TRATAMENTO DE ERRO SEGURO
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token
   if (!token) {
@@ -486,7 +497,6 @@ io.use(async (socket, next) => {
   }
 })
 
-// Rate limiting por socket (evita flooding)
 const socketRateLimit = new Map()
 
 io.on('connection', socket => {
@@ -705,9 +715,8 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' })
 })
 
-// Error handler global (melhorado para capturar erros inesperados)
+// Error handler global
 app.use((err, req, res, next) => {
-  // Log detalhado do erro
   console.error('❌ ERRO GLOBAL:', {
     message: err.message,
     stack: err.stack,

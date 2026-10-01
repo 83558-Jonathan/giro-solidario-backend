@@ -2,44 +2,85 @@ const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 
 const userSchema = new mongoose.Schema({
-  nome: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  telefone: { type: String, required: true },
-  cpf: { type: String, required: true, unique: true },
-  chavePix: { type: String, required: true },
+  // ===========================================
+  // CAMPOS OBRIGATÓRIOS
+  // ===========================================
+  nome: { type: String, required: true, trim: true },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  cpf: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
+  senha: { type: String, required: true },
+
+  // ===========================================
+  // CAMPOS OPCIONAIS (cadastro simplificado não usa)
+  // ===========================================
+  telefone: {
+    type: String,
+    required: false,
+    default: null,
+    trim: true
+  },
+  chavePix: {
+    type: String,
+    required: false,
+    default: null,
+    trim: true
+  },
   tipoChavePix: {
     type: String,
     enum: ['cpf', 'email', 'telefone', 'aleatoria'],
-    required: true
+    default: null
+    // ⚠️ Removi o `null` de dentro do enum — não precisa estar lá,
+    // o `default: null` já cobre o caso vazio
   },
-  senha: { type: String, required: true },
+
+  // ===========================================
+  // PERFIL / STATUS
+  // ===========================================
   role: { type: String, default: 'user' },
   status: { type: String, default: 'ativo' },
+
+  // ===========================================
+  // INDICAÇÕES
+  // ===========================================
   codigoConvite: { type: String, unique: true, sparse: true },
   indicadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   meusIndicados: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   totalIndicacoes: { type: Number, default: 0 },
   indicacoesConfirmadas: { type: Number, default: 0 },
 
-  // Campo para marcar usuários que estão aguardando vaga de vermelho
+  // ===========================================
+  // FILA / RODADAS
+  // ===========================================
   aguardandoVermelho: { type: Boolean, default: false },
-
-  // Fila FIFO
   posicaoFila: { type: Number, default: null },
   dataEntradaFila: { type: Date, default: null },
-
-  // NOVO: ID da rodada da qual foi removido (para não realocar nela)
   rodadaBloqueada: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Rodada',
     default: null
   },
 
+  // ===========================================
+  // SALDOS
+  // ===========================================
   saldo: { type: Number, default: 0 },
   totalGanho: { type: Number, default: 0 },
   saldoPremio: { type: Number, default: 0 },
 
-  // Recuperação de senha
+  // ===========================================
+  // RECUPERAÇÃO DE SENHA
+  // ===========================================
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
 

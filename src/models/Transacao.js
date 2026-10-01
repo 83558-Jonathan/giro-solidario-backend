@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const { VALOR_VERMELHO } = require('../config/constantes')
 
 const transacaoSchema = new mongoose.Schema(
   {
@@ -20,11 +21,11 @@ const transacaoSchema = new mongoose.Schema(
     valor: {
       type: Number,
       required: true,
-      default: 150
+      default: VALOR_VERMELHO
     },
     valorPago: {
       type: Number,
-      default: 150
+      default: VALOR_VERMELHO
     },
     rodada: {
       type: mongoose.Schema.Types.ObjectId,
@@ -59,7 +60,6 @@ const transacaoSchema = new mongoose.Schema(
   }
 )
 
-// Índices para otimização de consultas
 transacaoSchema.index({ pagador: 1, status: 1 })
 transacaoSchema.index({ cobrancaId: 1 })
 transacaoSchema.index({ rodada: 1, status: 1 })

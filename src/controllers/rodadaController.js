@@ -4,6 +4,7 @@ const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const mongoose = require('mongoose')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
+const { VALOR_VERMELHO } = require('../config/constantes')
 
 exports.criarRodada = async (req, res) => {
   try {
@@ -195,7 +196,7 @@ exports.getMandala = async (req, res) => {
               tipo: 'deposito',
               pagador: participante.usuario,
               recebedor: rodada.verde,
-              valor: 150,
+              valor: VALOR_VERMELHO,
               rodada: rodada._id,
               status: 'pendente'
             })

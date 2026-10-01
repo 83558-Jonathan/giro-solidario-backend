@@ -1,5 +1,5 @@
-// models/SolicitacaoSaque.js
 const mongoose = require('mongoose')
+const { PREMIO_VERDE } = require('../config/constantes')
 
 const solicitacaoSaqueSchema = new mongoose.Schema(
   {
@@ -16,7 +16,7 @@ const solicitacaoSaqueSchema = new mongoose.Schema(
     valor: {
       type: Number,
       required: true,
-      default: 1000
+      default: PREMIO_VERDE
     },
     chavePix: {
       type: String,

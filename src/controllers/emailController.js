@@ -2,6 +2,7 @@ const User = require('../models/User')
 const Rodada = require('../models/Rodada')
 const Transacao = require('../models/Transacao')
 const nodemailer = require('nodemailer')
+const { VALOR_VERMELHO, PREMIO_VERDE } = require('../config/constantes')
 
 const getFrontendUrl = () => {
   const url = process.env.FRONTEND_URL || 'https://giropremiados.com.br'
@@ -62,7 +63,11 @@ async function enviarEmailQrCodePix (
   /* manter HTML */
 }
 
-exports.notificarPremioVerde = async (usuarioId, rodadaId, valor = 1000) => {
+exports.notificarPremioVerde = async (
+  usuarioId,
+  rodadaId,
+  valor = PREMIO_VERDE
+) => {
   try {
     const usuario = await User.findById(usuarioId)
     const rodada = await Rodada.findById(rodadaId)
@@ -84,17 +89,20 @@ exports.cobrarUsuario = async (req, res) => {
     if (!podeEnviarEmail(usuarioId, rodadaId)) {
       const ultimoEnvio = emailCooldownCache.get(`${usuarioId}_${rodadaId}`)
       const horasRestantes = 24 - (Date.now() - ultimoEnvio) / (1000 * 60 * 60)
-      return res
-        .status(429)
-        .json({
-          error: `Aguarde ${Math.ceil(horasRestantes)} horas para novo lembrete`
-        })
+      return res.status(429).json({
+        error: `Aguarde ${Math.ceil(horasRestantes)} horas para novo lembrete`
+      })
     }
     const usuario = await User.findById(usuarioId)
     const rodada = await Rodada.findById(rodadaId)
     if (!usuario || !rodada)
       return res.status(404).json({ error: 'Usuário ou rodada não encontrado' })
-    await enviarEmailCobranca(usuario, rodada, valor || 150, 'cobranca')
+    await enviarEmailCobranca(
+      usuario,
+      rodada,
+      valor || VALOR_VERMELHO,
+      'cobranca'
+    )
     registrarEnvio(usuarioId, rodadaId)
     res.json({
       success: true,
@@ -123,7 +131,12 @@ exports.enviarLembrete = async (req, res) => {
     const rodada = await Rodada.findById(rodadaId)
     if (!usuario || !rodada)
       return res.status(404).json({ error: 'Usuário ou rodada não encontrado' })
-    await enviarEmailCobranca(usuario, rodada, valor || 150, 'lembrete')
+    await enviarEmailCobranca(
+      usuario,
+      rodada,
+      valor || VALOR_VERMELHO,
+      'lembrete'
+    )
     registrarEnvio(usuarioId, rodadaId)
     res.json({
       success: true,
@@ -159,7 +172,7 @@ exports.cobrarTodosPendentes = async (req, res) => {
       }
       try {
         const usuario = await User.findById(v.usuario)
-        await enviarEmailCobranca(usuario, rodada, 150, 'lembrete')
+        await enviarEmailCobranca(usuario, rodada, VALOR_VERMELHO, 'lembrete')
         registrarEnvio(usuarioId, rodadaId)
         resultados.push({ usuario: usuario.nome, email: usuario.email })
       } catch (err) {
