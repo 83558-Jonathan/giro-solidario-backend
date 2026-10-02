@@ -47,7 +47,7 @@
             const data = await response.json();
 
             if (response.ok) {
-                console.log(`✅ [${i}/${TOTAL_USUARIOS}] Sucesso: ${nome} → ${data.entrouNaFila ? 'Fila' : 'Rodada'}`);
+                console.log(`[${i}/${TOTAL_USUARIOS}] Sucesso: ${nome} → ${data.entrouNaFila ? 'Fila' : 'Rodada'}`);
                 resultados.push({
                     id: data.usuario?.id || 'N/A',
                     nome,
@@ -75,7 +75,7 @@
     console.log('\n' + '='.repeat(60));
     console.log('📊 RESUMO DA CRIAÇÃO');
     console.log('='.repeat(60));
-    console.log(`✅ Sucessos: ${resultados.length}/${TOTAL_USUARIOS}`);
+    console.log(`Sucessos: ${resultados.length}/${TOTAL_USUARIOS}`);
     console.log(`❌ Erros: ${erros.length}/${TOTAL_USUARIOS}`);
 
     if (resultados.length > 0) {

@@ -12,29 +12,38 @@ require('dotenv').config()
 const app = express()
 const server = http.createServer(app)
 const PORT = process.env.PORT || 5001
+
 const criarAdmin = require('./src/scripts/seedAdmin')
 const ChatMessage = require('./src/models/ChatMessage')
 const Rodada = require('./src/models/Rodada')
+const User = require('./src/models/User')
 const jwt = require('jsonwebtoken')
+const cron = require('node-cron')
+const escapeHtml = require('escape-html')
+
 const {
   removerVermelhosInadimplentes,
   processarTransacoesExpiradas
 } = require('./src/controllers/pixController')
-const cron = require('node-cron')
-const escapeHtml = require('escape-html')
 
-// 🔧 MOVENDO IMPORTAÇÕES PARA O TOPO (evita recarregamento)
 const RodadaService = require('./src/services/rodadaService')
 const Transacao = require('./src/models/Transacao')
-const { abacateV2 } = require('./src/config/abacate') // ✅ Migrado para V2
+const { abacateV2 } = require('./src/config/abacate')
 const {
   processarPagamentoComControle
 } = require('./src/controllers/pixController')
 const expiraPixJob = require('./src/jobs/expiraPix')
 
+// NOVOS SERVIÇOS
+const pushService = require('./src/services/pushService')
+const activityService = require('./src/services/activityService')
+const notificationService = require('./src/services/notificationService')
+
 // ===========================================
 // JOBS E CRON
 // ===========================================
+
+// Limpeza de vermelhos inadimplentes (1h)
 cron.schedule('0 * * * *', () => {
   console.log(
     '⏰ [CRON-HORARIO] Executando limpeza de vermelhos inadimplentes...'
@@ -42,6 +51,81 @@ cron.schedule('0 * * * *', () => {
   removerVermelhosInadimplentes().catch(err =>
     console.error('Erro na limpeza horária:', err)
   )
+})
+
+// NOVO: Re-engagement — usuários inativos há 3+ dias
+cron.schedule('0 10 * * *', async () => {
+  try {
+    console.log('⏰ [CRON-REENGAGE] Buscando usuários inativos...')
+    const tresDiasAtras = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+
+    const inativos = await User.find({
+      ultimoAcesso: { $lt: tresDiasAtras },
+      aguardandoVermelho: false
+    })
+      .select('_id nome email')
+      .limit(500)
+
+    if (!inativos.length) {
+      console.log('   Nenhum usuário inativo encontrado')
+      return
+    }
+
+    let enviados = 0
+    for (const u of inativos) {
+      const primeiroNome = u.nome?.split(' ')[0] || 'amigo'
+      const payload = pushService.templates.reEngajamento(primeiroNome)
+      const r = await pushService.enviarParaUsuario(u._id, payload)
+      enviados += r.enviados
+    }
+    console.log(`   ${enviados} push de re-engajamento enviados`)
+  } catch (err) {
+    console.error('[CRON-REENGAGE] Erro:', err.message)
+  }
+})
+
+// NOVO: Rodada quase completa — a cada 1 minuto, dispara push pra fila
+let pushRodadaQuaseCompleta = new Map() // rodadaId → timestamp do último envio
+cron.schedule('* * * * *', async () => {
+  try {
+    // Busca rodadas com 7/8 vermelhos que NÃO avisamos nos últimos 10 min
+    const dezMinAtras = Date.now() - 10 * 60 * 1000
+    const rodadas = await Rodada.find({
+      status: { $in: ['em_andamento', 'aguardando'] }
+    }).select('_id nome participantes')
+
+    for (const r of rodadas) {
+      const vermelhos = r.participantes.filter(p => p.cor === 'vermelho')
+      const pendentes = vermelhos.filter(p => !p.depositoConfirmado)
+      // Só dispara se falta só 1
+      if (vermelhos.length === 7 && pendentes.length === 1) {
+        const ultimoAviso = pushRodadaQuaseCompleta.get(String(r._id))
+        if (ultimoAviso && ultimoAviso > dezMinAtras) continue
+
+        pushRodadaQuaseCompleta.set(String(r._id), Date.now())
+
+        // Pega quem está na fila
+        const fila = await User.find({ aguardandoVermelho: true }).select('_id')
+        if (fila.length) {
+          const payload = pushService.templates.rodadaQuaseCompleta(
+            r.nome,
+            7,
+            8
+          )
+          const ids = fila.map(u => u._id)
+          const res = await pushService.enviarParaUsuarios(ids, payload)
+          console.log(
+            `⚡ [CRON-QUASE] ${r.nome} está 7/8 — ${res.enviados} push enviados para fila`
+          )
+        }
+      } else {
+        // Limpa cache se não está mais em 7/8
+        pushRodadaQuaseCompleta.delete(String(r._id))
+      }
+    }
+  } catch (err) {
+    console.error('[CRON-QUASE] Erro:', err.message)
+  }
 })
 
 // Alocação periódica da fila (a cada 10s)
@@ -54,9 +138,7 @@ setInterval(async () => {
   }
 }, 10000)
 
-// ===========================================
 // Job periódico para verificar transações pendentes (V2 - fallback)
-// ===========================================
 setInterval(async () => {
   try {
     const transacoesPendentes = await Transacao.find({
@@ -73,7 +155,6 @@ setInterval(async () => {
 
     for (const transacao of transacoesPendentes) {
       try {
-        // ✅ V2: endpoint correto para checkout transparente
         const response = await abacateV2.get('/v2/transparents/check', {
           params: { id: transacao.cobrancaId }
         })
@@ -83,7 +164,7 @@ setInterval(async () => {
 
         if (statusApi === 'PAID') {
           console.log(
-            `[JOB-PIX] ✅ Pagamento confirmado para transação ${transacao._id}`
+            `[JOB-PIX] Pagamento confirmado para transação ${transacao._id}`
           )
           await processarPagamentoComControle(
             transacao._id.toString(),
@@ -91,14 +172,12 @@ setInterval(async () => {
           )
         } else if (statusApi === 'EXPIRED' || statusApi === 'CANCELLED') {
           console.log(`[JOB-PIX] ⏰ Transação ${transacao._id} ${statusApi}`)
-          // Marca como expirada para não ficar verificando eternamente
           await Transacao.updateOne(
             { _id: transacao._id, status: 'pendente' },
             { $set: { status: 'cancelada_expirada' } }
           )
         }
       } catch (err) {
-        // Ignora 400 (transação antiga/teste que a AbacatePay não reconhece)
         if (err.response?.status === 400) {
           console.warn(
             `[JOB-PIX] Transação ${transacao._id} não encontrada na AbacatePay — marcando como cancelada`
@@ -125,7 +204,7 @@ setInterval(async () => {
 }, 30000)
 
 // ===========================================
-// TRUST PROXY (IP real via Cloudflare)
+// TRUST PROXY
 // ===========================================
 app.set('trust proxy', 'loopback')
 
@@ -136,7 +215,7 @@ const getRealIp = req => {
 }
 
 // ===========================================
-// CORS (deve vir antes dos parsers para OPTIONS)
+// CORS
 // ===========================================
 const allowedOrigins = [
   'https://giropremiados.com.br',
@@ -165,13 +244,20 @@ app.use(
 )
 
 // ===========================================
-// PARSERS DE BODY (necessários antes do log com hasBody)
+// PARSERS DE BODY (com rawBody para webhook HMAC)
 // ===========================================
-app.use(express.json({ limit: '10mb' }))
+app.use(
+  express.json({
+    limit: '10mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf
+    }
+  })
+)
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 // ===========================================
-// MIDDLEWARE DE LOG (✅ AGORA DEPOIS DO express.json)
+// MIDDLEWARE DE LOG
 // ===========================================
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
@@ -194,7 +280,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ===========================================
-// CONFIGURAÇÕES DE SEGURANÇA (HELMET, COMPRESSION, TIMEOUT)
+// SEGURANÇA
 // ===========================================
 app.use(
   helmet({
@@ -224,10 +310,8 @@ app.use((req, res, next) => {
 })
 
 // ===========================================
-// 🛡️ SANITIZAÇÃO MANUAL
+// SANITIZAÇÃO
 // ===========================================
-
-// 1. Remove operadores $ (NoSQL injection)
 app.use((req, res, next) => {
   const sanitizeObject = obj => {
     if (!obj || typeof obj !== 'object') return
@@ -241,7 +325,6 @@ app.use((req, res, next) => {
   next()
 })
 
-// 2. Sanitização de strings específicas (XSS básico)
 const sanitizeString = str => {
   if (!str || typeof str !== 'string') return str
   return str.replace(/[<>]/g, '').trim()
@@ -271,7 +354,6 @@ app.use((req, res, next) => {
   next()
 })
 
-// 3. Proteção contra parameter pollution
 app.use((req, res, next) => {
   const checkDepth = (obj, depth = 0) => {
     if (depth > 5) throw new Error('Objeto muito aninhado')
@@ -292,7 +374,6 @@ app.use((req, res, next) => {
   }
 })
 
-// 4. Desabilitar métodos HTTP não utilizados
 app.use((req, res, next) => {
   const allowedMethods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
   if (!allowedMethods.includes(req.method)) {
@@ -301,7 +382,6 @@ app.use((req, res, next) => {
   next()
 })
 
-// 5. Bloqueio de acesso a arquivos sensíveis
 app.use((req, res, next) => {
   if (req.path.match(/\.(env|git|log|sql|bak|config|key|pem)$/)) {
     console.warn(
@@ -437,7 +517,11 @@ mongoose
     minPoolSize: 2
   })
   .then(async () => {
-    console.log('✅ MongoDB Conectado')
+    console.log('MongoDB Conectado')
+
+    // Inicializar serviços que precisam de io (feito depois do socket.io)
+    // (o socket.io é inicializado mais abaixo, e os serviços recebem io lá)
+
     await criarAdmin().catch(err => console.error('Erro ao criar admin:', err))
 
     expiraPixJob
@@ -455,7 +539,7 @@ mongoose
   .catch(err => console.error('❌ Erro na conexão MongoDB:', err))
 
 // ===========================================
-// SOCKET.IO (CHAT)
+// SOCKET.IO
 // ===========================================
 const io = socketIo(server, {
   cors: {
@@ -465,9 +549,15 @@ const io = socketIo(server, {
   }
 })
 
+// Injeta io nos serviços e controllers
 const pixController = require('./src/controllers/pixController')
 pixController.initializeIo(io)
 RodadaService.initializeIo(io)
+activityService.setIo(io)
+notificationService.setIo(io)
+
+// Inicializa pushService
+pushService.inicializar()
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token
@@ -480,9 +570,7 @@ io.use(async (socket, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    const usuario = await require('./src/models/User')
-      .findById(decoded.id)
-      .select('id nome email role')
+    const usuario = await User.findById(decoded.id).select('id nome email role')
     if (!usuario) {
       console.log(
         `❌ Socket rejeitado: usuário não encontrado (ID: ${decoded.id})`
@@ -507,6 +595,9 @@ io.on('connection', socket => {
   }
 
   console.log(`🟢 Usuário conectado: ${socket.usuario.nome} (${socket.id})`)
+
+  // Entra automaticamente na sala pessoal (pra notificações dirigidas)
+  socket.join(`user-${socket.usuario.id}`)
 
   socket.on('entrar-sala', async rodadaId => {
     if (!socket.usuario) {
@@ -683,6 +774,12 @@ app.use('/api/email', require('./src/routes/email.routes'))
 app.use('/api/admin', require('./src/routes/admin.routes'))
 app.use('/api/solicitacoes', require('./src/routes/solicitacao.routes'))
 
+// NOVAS ROTAS
+app.use('/api/push', require('./src/routes/push.routes'))
+app.use('/api/notificacoes', require('./src/routes/notificacao.routes'))
+app.use('/api/activity', require('./src/routes/activity.routes'))
+app.use('/api/onboarding', require('./src/routes/onboarding.routes'))
+
 const chatRoutes = require('./src/routes/chat.routes')
 app.use('/api/chat', chatHistoryLimiter, chatRoutes)
 app.use('/api/rodadas/:rodadaId/mandala', mandalaLimiter)
@@ -702,17 +799,16 @@ app.get('/', (req, res) => {
   res.json({
     message: 'API Giro Premiado',
     version: '1.0.0',
-    security: {
-      rateLimit: 'Ativo (por IP real)',
-      helmet: 'Ativo'
-    },
+    security: { rateLimit: 'Ativo (por IP real)', helmet: 'Ativo' },
     endpoints: {}
   })
 })
 
 // 404
 app.use((req, res) => {
-  res.status(404).json({ error: 'Rota não encontrada' })
+  res
+    .status(404)
+    .json({ success: false, error: 'Página ou recurso não encontrado.' })
 })
 
 // Error handler global
@@ -722,9 +818,7 @@ app.use((err, req, res, next) => {
     stack: err.stack,
     url: req.url,
     method: req.method,
-    ip: getRealIp(req),
-    body: req.body ? JSON.stringify(req.body).substring(0, 200) : undefined,
-    headers: req.headers ? { ...req.headers, authorization: '***' } : undefined
+    ip: getRealIp(req)
   })
 
   if (err.timeout) {
@@ -737,11 +831,25 @@ app.use((err, req, res, next) => {
       .status(429)
       .json({ error: 'Muitas requisições. Tente novamente mais tarde.' })
   }
+  if (err.name === 'ValidationError') {
+    const primeiro = Object.values(err.errors)[0]
+    return res.status(400).json({
+      success: false,
+      error: `O campo "${primeiro?.path || 'campo'}" está inválido.`
+    })
+  }
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      error: 'Um dos dados enviados está em formato inválido.'
+    })
+  }
+
   const errorMsg =
     process.env.NODE_ENV === 'development'
       ? err.message
-      : 'Erro interno do servidor'
-  res.status(500).json({ error: errorMsg })
+      : 'Algo deu errado. Tente novamente em alguns instantes.'
+  res.status(500).json({ success: false, error: errorMsg })
 })
 
 server.listen(PORT, () => {
@@ -750,6 +858,7 @@ server.listen(PORT, () => {
 📍 Ambiente: ${process.env.NODE_ENV || 'development'}
 🔗 URL: http://localhost:${PORT}
 💬 WebSocket (chat) ativo
+🔔 Push Notification ativo
 `)
 })
 

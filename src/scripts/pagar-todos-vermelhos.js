@@ -1,5 +1,6 @@
 // pagar-todos-vermelhos.js
 // Execute: node src/scripts/pagar-todos-vermelhos.js
+// ⚠️ Tenha o backend LIGADO em outro terminal para ver a progressão
 
 const mongoose = require('mongoose')
 require('dotenv').config()
@@ -21,7 +22,7 @@ const colors = {
 }
 
 function logSuccess (msg) {
-  console.log(`${colors.green}✅ ${msg}${colors.reset}`)
+  console.log(`${colors.green}${msg}${colors.reset}`)
 }
 function logError (msg) {
   console.log(`${colors.red}❌ ${msg}${colors.reset}`)
@@ -56,16 +57,18 @@ async function main () {
     await mongoose.connect(MONGODB_URI)
     logSuccess('Conectado ao MongoDB')
 
-    const admin = await User.findOne({ email: 'admin@giropremiados.com.br' })
+    //  Busca admin por role (imune a divergência de email)
+    const admin = await User.findOne({ role: 'admin' }).sort({ createdAt: 1 })
     if (!admin) {
-      logError('Admin não encontrado!')
+      logError(
+        'Nenhum admin encontrado no banco. Rode resetar-criar-usuarios.js primeiro.'
+      )
       return
     }
     logInfo(`Admin: ${admin.nome} (${admin.email})`)
 
     // ===========================================
-    // 1. Buscar TODAS as rodadas que podem ter vermelhos pendentes
-    //    (em_andamento ou aguardando com estrutura e verde definido)
+    // 1. Buscar rodadas com vermelhos pendentes
     // ===========================================
     const rodadas = await Rodada.find({
       $or: [
@@ -85,6 +88,7 @@ async function main () {
 
     let totalPagos = 0
     let totalErros = 0
+    const verdesPremiados = [] // guarda quem ganhou prêmio nessa execução
 
     for (const rodada of rodadas) {
       console.log(
@@ -94,7 +98,6 @@ async function main () {
       console.log(`   Verde definido: ${rodada.verde ? 'SIM' : 'NÃO'}`)
       console.log(`   Participantes: ${rodada.participantes.length}/15`)
 
-      // Buscar vermelhos que ainda NÃO pagaram
       const vermelhosNaoPagos = rodada.participantes.filter(
         p => p.cor === 'vermelho' && p.depositoConfirmado !== true
       )
@@ -106,14 +109,13 @@ async function main () {
 
       console.log(`   🔴 Vermelhos pendentes: ${vermelhosNaoPagos.length}`)
 
-      // Para cada vermelho pendente, encontrar a transação associada (deve existir)
       for (const participante of vermelhosNaoPagos) {
         const usuario = await User.findById(participante.usuario)
         console.log(
           `\n   💰 Processando ${usuario?.nome || participante.usuario}...`
         )
 
-        // Buscar transação pendente para este usuário nesta rodada
+        // Buscar transação pendente
         let transacao = null
         if (participante.transacaoId) {
           transacao = await Transacao.findById(participante.transacaoId)
@@ -128,39 +130,54 @@ async function main () {
 
         if (!transacao) {
           logWarning(
-            `      ⚠️ Nenhuma transação pendente encontrada para ${
-              usuario?.nome || participante.usuario
-            }. Pulando.`
+            `      ⚠️ Nenhuma transação pendente. Pulando.`
           )
           totalErros++
           continue
         }
 
-        // Confirmar depósito usando o serviço (já tem controle de duplicidade)
+        //  Tenta restaurar io pro serviço (se backend tá ligado, o cron
+        //    dele detecta; se não, o script segue sozinho)
         try {
           await RodadaService.confirmarDeposito(
             transacao._id.toString(),
             `pagamento_auto_${Date.now()}_${transacao._id}.png`,
             admin._id.toString()
           )
-          logSuccess(`      ✅ Pagamento confirmado!`)
+          logSuccess(`      ✓ Pagamento confirmado!`)
           totalPagos++
 
-          // Pequeno delay para não sobrecarregar e permitir que o `avancarRodada` (se acionado) possa executar
           await new Promise(resolve => setTimeout(resolve, 300))
         } catch (err) {
-          logError(`      ❌ Erro ao confirmar pagamento: ${err.message}`)
+          logError(`      ❌ Erro ao confirmar: ${err.message}`)
           totalErros++
+        }
+      }
+
+      // Após processar essa rodada, checa se ela foi concluída
+      const rodadaAtualizada = await Rodada.findById(rodada._id)
+      if (
+        rodadaAtualizada &&
+        rodadaAtualizada.status === 'concluida' &&
+        rodadaAtualizada.verde
+      ) {
+        const verde = await User.findById(rodadaAtualizada.verde)
+        if (verde && !verdesPremiados.find(v => v.id === verde._id.toString())) {
+          verdesPremiados.push({
+            id: verde._id.toString(),
+            nome: verde.nome,
+            saldo: verde.saldoPremio,
+            rodada: rodadaAtualizada.nome
+          })
         }
       }
     }
 
     // ===========================================
-    // 2. Verificar resultado final (incluindo possíveis novas rodadas geradas)
+    // 2. Resultado final
     // ===========================================
     logSection('RESULTADO FINAL')
 
-    // Buscar todas as rodadas novamente (algumas podem ter avançado)
     const todasRodadas = await Rodada.find({}).sort({ numero: 1 })
 
     console.log(`\n📊 STATUS DAS RODADAS APÓS PAGAMENTOS:\n`)
@@ -172,7 +189,7 @@ async function main () {
       )
 
       let icon = '🔄'
-      if (rodada.status === 'concluida') icon = '✅'
+      if (rodada.status === 'concluida') icon = ''
       else if (rodada.status === 'aguardando') icon = '⏳'
 
       console.log(
@@ -194,14 +211,24 @@ async function main () {
       }
     }
 
-    // Verificar fila restante
+    // 🏆 Verde premiado
+    if (verdesPremiados.length > 0) {
+      console.log(`\n${colors.yellow}🏆 VERDE(S) PREMIADO(S):${colors.reset}`)
+      for (const v of verdesPremiados) {
+        console.log(
+          `   ${v.nome} — R$ ${v.saldo} creditados (${v.rodada})`
+        )
+      }
+    }
+
+    // Fila
     const filaRestante = await User.find({ aguardandoVermelho: true }).sort({
       posicaoFila: 1
     })
 
     console.log(`\n⏳ FILA DE ESPERA:`)
     if (filaRestante.length === 0) {
-      logSuccess(`   ✅ Fila vazia! Todos os usuários foram alocados.`)
+      logSuccess(`   Fila vazia!`)
     } else {
       console.log(`   ${filaRestante.length} usuário(s) na fila:`)
       for (const user of filaRestante) {
@@ -211,11 +238,8 @@ async function main () {
       }
     }
 
-    // Estatísticas finais
+    // Estatísticas
     const totalUsuarios = await User.countDocuments()
-    const usuariosEmRodadas = await User.countDocuments({
-      aguardandoVermelho: false
-    })
     const usuariosAguardando = await User.countDocuments({
       aguardandoVermelho: true
     })
@@ -226,7 +250,6 @@ async function main () {
 
     console.log(`\n${colors.cyan}📊 ESTATÍSTICAS FINAIS:${colors.reset}`)
     console.log(`   Total de usuários: ${totalUsuarios}`)
-    console.log(`   Usuários em rodadas: ${usuariosEmRodadas}`)
     console.log(`   Usuários na fila: ${usuariosAguardando}`)
     console.log(`   Total de rodadas: ${totalRodadas}`)
     console.log(`   Rodadas concluídas: ${rodadasConcluidas}`)

@@ -109,11 +109,11 @@ async function seedUsuarios() {
       const exists = await users.findOne({ email: usuario.email });
       if (!exists) {
         await users.insertOne(usuario);
-        console.log(`  ✅ Usuário criado: ${usuario.nome}`);
+        console.log(`  Usuário criado: ${usuario.nome}`);
       }
     }
     
-    console.log(`${colors.green}✅ Seed de usuários concluído!${colors.reset}`);
+    console.log(`${colors.green}Seed de usuários concluído!${colors.reset}`);
     
   } catch (error) {
     console.error('❌ Erro no seed:', error);

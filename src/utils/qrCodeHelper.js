@@ -73,7 +73,7 @@ async function gerarQrCodeParaTransacao (transacaoId) {
   await transacao.save()
 
   console.log(
-    `✅ [qrCodeHelper] QR Code gerado. cobrancaId=${cobrancaId}, expira em ${expiresAt}`
+    `[qrCodeHelper] QR Code gerado. cobrancaId=${cobrancaId}, expira em ${expiresAt}`
   )
 
   try {

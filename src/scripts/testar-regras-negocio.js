@@ -23,7 +23,7 @@ const colors = {
 }
 
 function logSuccess (msg) {
-  console.log(`${colors.green}✅ ${msg}${colors.reset}`)
+  console.log(`${colors.green}${msg}${colors.reset}`)
 }
 function logError (msg) {
   console.log(`${colors.red}❌ ${msg}${colors.reset}`)
@@ -165,7 +165,7 @@ async function testarRegra2_ApenasProgressaoCriaRodadas () {
   logInfo(`Rodadas geradas: ${rodadasGeradas.length}`)
 
   if (rodadasGeradas.length === 2) {
-    logSuccess('✅ APENAS 2 rodadas criadas (progressão correta)')
+    logSuccess('APENAS 2 rodadas criadas (progressão correta)')
     return true
   }
   logError(`❌ ${rodadasGeradas.length} rodadas criadas (deveria ser 2)`)
@@ -517,7 +517,7 @@ async function testarRegra5_FilaEsperaFIFO () {
         logError(`   ❌ Vermelho ${vermelho.usuario} NÃO tem transação criada!`)
         todosComTransacao = false
       } else {
-        logSuccess(`   ✅ Vermelho ${vermelho.usuario} possui transação`)
+        logSuccess(`   Vermelho ${vermelho.usuario} possui transação`)
       }
     }
   }
@@ -531,7 +531,7 @@ async function testarRegra5_FilaEsperaFIFO () {
     `\n📊 Resumo: ${totalVermelhosNasRodadas} vermelhos alocados, todos com transação.`
   )
   logSuccess(
-    `✅ TODOS os vermelhos têm pelo menos uma transação/QR Code criado!`
+    `TODOS os vermelhos têm pelo menos uma transação/QR Code criado!`
   )
 
   // ------------------------------------------------------------------
@@ -617,7 +617,7 @@ async function testarRegra7_UsuarioUnicaRodada () {
     return false
   } catch (error) {
     logSuccess(
-      `✅ Usuário impedido de entrar na segunda rodada: ${error.message}`
+      `Usuário impedido de entrar na segunda rodada: ${error.message}`
     )
     return true
   }
@@ -790,7 +790,7 @@ async function testarRegra10_SaqueEReativacao () {
     result1.pagoAutomaticamente &&
     saldoFinal1 === 850
   ) {
-    logSuccess(`   ✅ Saque cancelado, saldo descontado para R$ ${saldoFinal1}`)
+    logSuccess(`   Saque cancelado, saldo descontado para R$ ${saldoFinal1}`)
   } else {
     logError(
       `   ❌ Falha: status=${saqueAtualizado1.status}, pago=${result1.pagoAutomaticamente}, saldo=${saldoFinal1}`
@@ -861,7 +861,7 @@ async function testarRegra10_SaqueEReativacao () {
 
   if (result2.pagoAutomaticamente && saldoFinal2 === 850) {
     logSuccess(
-      `   ✅ Após recusa, jogar novamente pagou R$150 com saldo (restante R$ ${saldoFinal2})`
+      `   Após recusa, jogar novamente pagou R$150 com saldo (restante R$ ${saldoFinal2})`
     )
   } else {
     logError(
@@ -916,16 +916,16 @@ async function testarRegra10_SaqueEReativacao () {
 
   const ganhadorFinal3 = await User.findById(ganhador3._id)
   if (ganhadorFinal3.saldoPremio === 0) {
-    logSuccess(`   ✅ Saque aprovado, saldo zerado`)
+    logSuccess(`   Saque aprovado, saldo zerado`)
   } else {
     logError(`   ❌ Saldo não zerou: R$ ${ganhadorFinal3.saldoPremio}`)
     return false
   }
 
   logInfo(`\n📊 RESUMO REGRA 10:`)
-  logInfo(`   ✅ Cancelamento automático de saque pendente`)
-  logInfo(`   ✅ Recusa + reativação + jogar novamente com saldo`)
-  logInfo(`   ✅ Aprovação zera o saldo`)
+  logInfo(`   Cancelamento automático de saque pendente`)
+  logInfo(`   Recusa + reativação + jogar novamente com saldo`)
+  logInfo(`   Aprovação zera o saldo`)
   return true
 }
 
@@ -990,7 +990,7 @@ async function testarRegra11_ConviteFunciona () {
 
   if (indicacaoRegistrada) {
     logSuccess(
-      `✅ Convite funcionou: ${convidante.nome} indicou ${convidado.nome}`
+      `Convite funcionou: ${convidante.nome} indicou ${convidado.nome}`
     )
     return true
   }
@@ -1043,7 +1043,7 @@ async function testarRegra12_AzulPodeCaptar () {
 
   if (podeAdicionar) {
     logSuccess(
-      `✅ AZUL pode captar (já trouxe ${indicadosNaRodada.length} de 2)`
+      `AZUL pode captar (já trouxe ${indicadosNaRodada.length} de 2)`
     )
     return true
   }
@@ -1098,7 +1098,7 @@ async function testarRegra13_EmailQrCodeEnviado () {
     })
 
     if (emailEnviado) {
-      logSuccess(`✅ Email com QR Code foi enviado`)
+      logSuccess(`Email com QR Code foi enviado`)
       return true
     } else {
       logError('❌ Email com QR Code NÃO foi enviado')
@@ -1193,7 +1193,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     )
     return false
   }
-  logSuccess(`   ✅ Entrou pago, saldo R$ ${result1.saldoRestante}`)
+  logSuccess(`   Entrou pago, saldo R$ ${result1.saldoRestante}`)
 
   // ------------------------------------------------------------------
   // 14.2 – Verde com saldo insuficiente (R$50) e vaga → QR Code pendente
@@ -1227,7 +1227,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     return false
   }
   logSuccess(
-    `   ✅ Entrou com QR Code pendente (transação ${transacaoPendente._id})`
+    `   Entrou com QR Code pendente (transação ${transacaoPendente._id})`
   )
 
   // ------------------------------------------------------------------
@@ -1243,7 +1243,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     logError(`   ❌ Saldo não zerou: R$ ${saldoFinal3}`)
     return false
   }
-  logSuccess(`   ✅ Entrou pago, saldo zerado`)
+  logSuccess(`   Entrou pago, saldo zerado`)
 
   // ------------------------------------------------------------------
   // 14.4 – Verde com saldo, mas nenhuma vaga → vai para fila
@@ -1273,7 +1273,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     logError(`   ❌ Deveria ir para a fila, mas não foi`)
     return false
   }
-  logSuccess(`   ✅ Foi para a fila (posição ${result4.posicao})`)
+  logSuccess(`   Foi para a fila (posição ${result4.posicao})`)
 
   // ===========================================
   // 14.5 – Verde na fila, surge vaga → ao alocar, saldo é descontado
@@ -1437,7 +1437,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     )
     return false
   }
-  logSuccess(`   ✅ Alocado da fila, saldo descontado para R$ 850`)
+  logSuccess(`   Alocado da fila, saldo descontado para R$ 850`)
 
   // ------------------------------------------------------------------
   // 14.6 – Verde com saque pendente → ao jogar novamente, cancela saque e paga
@@ -1474,7 +1474,7 @@ async function testarRegra14_JogarNovamenteComSaldo () {
     )
     return false
   }
-  logSuccess(`   ✅ Saque cancelado, saldo R$ 850`)
+  logSuccess(`   Saque cancelado, saldo R$ 850`)
 
   // Todos os subcenários passaram
   return true
@@ -1565,7 +1565,7 @@ async function runAllTests () {
 
     console.log(`\n${'📊'.repeat(35)}`)
     console.log(`   Total de testes: ${totalCount}`)
-    console.log(`   ✅ Aprovados: ${passedCount}`)
+    console.log(`   Aprovados: ${passedCount}`)
     console.log(`   ❌ Falhas: ${totalCount - passedCount}`)
     console.log(
       `   📈 Percentual: ${((passedCount / totalCount) * 100).toFixed(1)}%`
@@ -1575,7 +1575,7 @@ async function runAllTests () {
     console.log(`${colors.cyan}📋 DETALHES DOS TESTES:${colors.reset}`)
     for (const result of results) {
       if (result.passed) {
-        console.log(`   ${colors.green}✅ ${result.name}${colors.reset}`)
+        console.log(`   ${colors.green}${result.name}${colors.reset}`)
       } else {
         console.log(`   ${colors.red}❌ ${result.name}${colors.reset}`)
       }

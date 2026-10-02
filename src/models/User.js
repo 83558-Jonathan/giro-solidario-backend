@@ -51,6 +51,19 @@ const userSchema = new mongoose.Schema({
   status: { type: String, default: 'ativo' },
 
   // ===========================================
+  // ONBOARDING / ENGAJAMENTO
+  // ===========================================
+  onboardingCompleto: { type: Boolean, default: false },
+  ultimoAcesso: { type: Date, default: Date.now },
+  badges: [
+    {
+      id: { type: String, required: true },
+      em: { type: Date, default: Date.now },
+      _id: false
+    }
+  ],
+
+  // ===========================================
   // INDICAÇÕES
   // ===========================================
   codigoConvite: { type: String, unique: true, sparse: true },

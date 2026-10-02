@@ -7,7 +7,12 @@ const mongoose = require('mongoose')
 const RodadaService = require('../services/rodadaService')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const nodemailer = require('nodemailer')
+
+// NOVO: serviços de engajamento
 const emailController = require('./emailController')
+const pushService = require('../services/pushService')
+const activityService = require('../services/activityService')
+const notificationService = require('../services/notificationService')
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.hostinger.com',
@@ -122,6 +127,7 @@ exports.registrar = async (req, res) => {
 
     const { nome, email, cpf, senha, codigoConvite } = req.body
 
+    // ---- Validações de entrada ----
     if (!nome || !email || !cpf || !senha) {
       return res.status(400).json({
         success: false,
@@ -153,6 +159,7 @@ exports.registrar = async (req, res) => {
       })
     }
 
+    // ---- Verifica duplicidade ----
     const existe = await User.findOne({
       $or: [{ email: emailNormalizado }, { cpf: cpfLimpo }]
     })
@@ -163,6 +170,7 @@ exports.registrar = async (req, res) => {
         .json({ success: false, error: `${campo} já cadastrado` })
     }
 
+    // ---- Cria usuário ----
     const salt = await bcrypt.genSalt(10)
     const senhaHash = await bcrypt.hash(senha, salt)
 
@@ -170,12 +178,15 @@ exports.registrar = async (req, res) => {
       nome: nome.trim(),
       email: emailNormalizado,
       cpf: cpfLimpo,
-      senha: senhaHash
+      senha: senhaHash,
+      // NOVO: marca onboarding como não concluído
+      onboardingCompleto: false,
+      ultimoAcesso: new Date()
     })
     usuario.codigoConvite =
       'CONVITE-' + Math.random().toString(36).substring(2, 10).toUpperCase()
     await usuario.save()
-    console.log(`✅ Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
+    console.log(`Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
 
     // ===========================================
     // LÓGICA DE FILA / RODADA / INDICAÇÃO
@@ -193,12 +204,30 @@ exports.registrar = async (req, res) => {
       console.log(`\n🔗 [COM CONVITE] Código recebido: ${codigoConvite}`)
       indicador = await User.findOne({ codigoConvite })
       if (indicador) {
-        console.log(`✅ [COM CONVITE] Indicador encontrado: ${indicador.nome}`)
+        console.log(`[COM CONVITE] Indicador encontrado: ${indicador.nome}`)
         usuario.indicadoPor = indicador._id
         await User.findByIdAndUpdate(indicador._id, {
           $push: { meusIndicados: usuario._id },
           $inc: { totalIndicacoes: 1 }
         })
+
+        // NOVO: notifica indicador (in-app + push + activity)
+        const primeiroNomeIndicado = usuario.nome.split(' ')[0]
+        notificationService
+          .novoIndicado(indicador._id, primeiroNomeIndicado)
+          .catch(err => console.error('❌ [notif] novoIndicado:', err.message))
+        pushService
+          .enviarParaUsuario(
+            indicador._id,
+            pushService.templates.novoIndicado(primeiroNomeIndicado)
+          )
+          .catch(err => console.error('❌ [push] novoIndicado:', err.message))
+        activityService
+          .novoIndicado(indicador._id, indicador.nome, usuario.nome)
+          .catch(err =>
+            console.error('❌ [activity] novoIndicado:', err.message)
+          )
+
         let rodadaDoIndicador =
           await RodadaService.buscarRodadaParaNovoVermelho(
             indicador._id.toString()
@@ -216,9 +245,9 @@ exports.registrar = async (req, res) => {
             entrouNaFila = false
             if (resultado.transacao) {
               dadosPagamento = resultado.transacao
-              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor} para confirmar.`
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor} para confirmar.`
             } else
-              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}, mas não foi possível gerar o QR Code. Entre em contato.`
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}, mas não foi possível gerar o QR Code. Entre em contato.`
           } catch (error) {
             console.error('❌ Erro ao adicionar como vermelho:', error)
             usuario.aguardandoVermelho = true
@@ -257,9 +286,9 @@ exports.registrar = async (req, res) => {
             entrouNaFila = false
             if (resultado.transacao) {
               dadosPagamento = resultado.transacao
-              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
             } else
-              mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
           } catch (error) {
             usuario.aguardandoVermelho = true
             posicaoFila = await getProximaPosicaoFila()
@@ -298,9 +327,9 @@ exports.registrar = async (req, res) => {
           entrouNaFila = false
           if (resultado.transacao) {
             dadosPagamento = resultado.transacao
-            mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
           } else
-            mensagemAuto = `✅ Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
         } catch (error) {
           usuario.aguardandoVermelho = true
           posicaoFila = await getProximaPosicaoFila()
@@ -322,19 +351,17 @@ exports.registrar = async (req, res) => {
     }
 
     // ===========================================
-    // ENVIO DE EMAILS (não bloqueia a resposta)
+    // NOVO: ENVIO DE EMAILS E NOTIFICAÇÕES (não bloqueiam a resposta)
     // ===========================================
-    // 1. Boas-vindas — sempre
+    // 1. Boas-vindas (sempre)
     emailController
       .enviarEmailBoasVindas(usuario, { entrouNaFila, posicaoFila })
-      .catch(err =>
-        console.error('❌ [email] Falha ao enviar boas-vindas:', err.message)
-      )
+      .catch(err => console.error('❌ [email] Boas-vindas:', err.message))
 
-    // 2. QR Code PIX — se gerou pagamento (o pixController já chamou no fluxo, mas reforçamos)
+    // 2. QR Code PIX (se gerou)
     if (dadosPagamento && usuario.email) {
       const rodadaPopulada = rodadaIdAdicionada
-        ? await Rodada.findById(rodadaIdAdicionada).select('nome')
+        ? await Rodada.findById(rodadaIdAdicionada).select('nome').lean()
         : null
       emailController
         .enviarEmailQrCodePix(
@@ -345,9 +372,14 @@ exports.registrar = async (req, res) => {
           dadosPagamento.valor,
           rodadaPopulada
         )
-        .catch(err =>
-          console.error('❌ [email] Falha ao enviar QR Code:', err.message)
-        )
+        .catch(err => console.error('❌ [email] QR Code:', err.message))
+    }
+
+    // 3. Activity log (entrada na rodada)
+    if (rodadaIdAdicionada) {
+      activityService
+        .entrada(usuario._id, usuario.nome, rodadaIdAdicionada)
+        .catch(() => {})
     }
 
     // ===========================================
@@ -362,7 +394,9 @@ exports.registrar = async (req, res) => {
         nome: usuario.nome,
         email: usuario.email,
         cpf: usuario.cpf,
-        codigoConvite: usuario.codigoConvite
+        codigoConvite: usuario.codigoConvite,
+        // NOVO
+        onboardingCompleto: usuario.onboardingCompleto || false
       },
       entrouNaFila,
       posicaoFila,
@@ -383,11 +417,12 @@ exports.registrar = async (req, res) => {
       }
     }
 
-    console.log(`\n✅ REGISTRO CONCLUÍDO COM SUCESSO!`)
+    console.log(`\nREGISTRO CONCLUÍDO COM SUCESSO!`)
     console.log(`   Usuário: ${usuario.nome}`)
     console.log(`   Email: ${usuario.email}`)
     console.log(`   CPF: ${usuario.cpf}`)
     console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
+    console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
     console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`)
     console.log(`   Pagamento: ${dadosPagamento ? 'QR Code gerado' : 'Nenhum'}`)
@@ -452,6 +487,12 @@ exports.login = async (req, res) => {
         .json({ success: false, error: 'Credenciais inválidas' })
     }
 
+    // NOVO: atualiza último acesso
+    User.updateOne(
+      { _id: usuario._id },
+      { $set: { ultimoAcesso: new Date() } }
+    ).catch(() => {})
+
     const token = gerarToken(usuario._id)
     return res.status(200).json({
       success: true,
@@ -462,7 +503,9 @@ exports.login = async (req, res) => {
         email: usuario.email,
         cpf: usuario.cpf,
         codigoConvite: usuario.codigoConvite,
-        role: usuario.role
+        role: usuario.role,
+        // NOVO
+        onboardingCompleto: usuario.onboardingCompleto || false
       }
     })
   } catch (error) {
@@ -558,7 +601,7 @@ exports.forgotPassword = async (req, res) => {
           <div style="text-align:center;margin:28px 0;">
             <a href="${resetUrl}" style="display:inline-block;background:#10B981;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:bold;">REDEFINIR SENHA</a>
           </div>
-          <p style="color:#6b7280;font-size:13px;">Se você não solicitou isso, ignore este email. Sua senha permanecerá a mesma.</p>
+          <p style="color:#6b7280;font-size:13px;">Se você não solicitou isso, ignore este email.</p>
           <p style="color:#9ca3af;font-size:12px;margin-top:24px;">Link direto: <br>${resetUrl}</p>
         </div>
       </div>

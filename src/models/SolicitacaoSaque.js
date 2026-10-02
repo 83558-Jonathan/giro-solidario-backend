@@ -61,4 +61,13 @@ const solicitacaoSaqueSchema = new mongoose.Schema(
   }
 )
 
+// Se tentar criar 2 com status 'pendente', MongoDB rejeita com E11000
+solicitacaoSaqueSchema.index(
+  { usuario: 1, rodada: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pendente' }
+  }
+)
+
 module.exports = mongoose.model('SolicitacaoSaque', solicitacaoSaqueSchema)

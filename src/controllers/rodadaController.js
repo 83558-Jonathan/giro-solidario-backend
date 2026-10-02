@@ -277,6 +277,9 @@ exports.jogarNovamente = async (req, res) => {
   }
 }
 
+// ===========================================
+// SACAR PRÊMIO — com LOCK ATÔMICO (evita duplicatas)
+// ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
     const { rodadaId } = req.params
@@ -284,50 +287,85 @@ exports.sacarPremio = async (req, res) => {
     console.log('\n' + '='.repeat(60))
     console.log('💰 [SACAR PRÊMIO] INICIANDO SOLICITAÇÃO')
     console.log('='.repeat(60))
-    if (!mongoose.Types.ObjectId.isValid(rodadaId))
+
+    if (!mongoose.Types.ObjectId.isValid(rodadaId)) {
       return res
         .status(400)
         .json({ success: false, error: 'ID da rodada inválido' })
-    const db = mongoose.connection.db
-    const rodada = await db
-      .collection('rodadas')
-      .findOne({ _id: new mongoose.Types.ObjectId(rodadaId) })
-    if (!rodada)
+    }
+
+    const usuarioIdStr = String(usuarioId)
+
+    // 1. Buscar usuário
+    const usuario = await User.findById(usuarioId)
+    if (!usuario) {
       return res
         .status(404)
-        .json({ success: false, error: 'Rodada não encontrada' })
-    if (rodada.status !== 'concluida')
-      return res
-        .status(400)
-        .json({ success: false, error: 'Esta rodada ainda não foi concluída' })
-    const verdeIdStr = rodada.verde?.toString
-      ? rodada.verde.toString()
-      : String(rodada.verde)
-    const usuarioIdStr = String(usuarioId)
-    const ehVerde = verdeIdStr === usuarioIdStr
-    const participanteConcluido = rodada.participantes?.find(
-      p => p.usuario.toString() === usuarioIdStr && p.cor === 'concluido'
+        .json({ success: false, error: 'Usuário não encontrado' })
+    }
+
+    // 2. LOCK ATÔMICO — só 1 request consegue marcar premioVerdePago=true
+    const rodada = await Rodada.findOneAndUpdate(
+      {
+        _id: rodadaId,
+        status: 'concluida',
+        premioVerdePago: { $ne: true },
+        $or: [
+          { verde: usuarioId },
+          {
+            participantes: {
+              $elemMatch: { usuario: usuarioId, cor: 'concluido' }
+            }
+          }
+        ]
+      },
+      { $set: { premioVerdePago: true } },
+      { new: true }
     )
-    if (!ehVerde && !participanteConcluido)
+
+    // 3. Se não achou, descobre o motivo exato
+    if (!rodada) {
+      const rodadaCheck = await Rodada.findById(rodadaId)
+      if (!rodadaCheck) {
+        return res
+          .status(404)
+          .json({ success: false, error: 'Rodada não encontrada' })
+      }
+      if (rodadaCheck.status !== 'concluida') {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: 'Esta rodada ainda não foi concluída'
+          })
+      }
+      if (rodadaCheck.premioVerdePago === true) {
+        return res.status(400).json({
+          success: false,
+          error: 'Prêmio já foi solicitado anteriormente'
+        })
+      }
       return res.status(403).json({
         success: false,
         error: 'Apenas o VERDE ou quem ganhou o prêmio pode solicitá-lo'
       })
-    if (rodada.premioVerdePago === true)
-      return res.status(400).json({
-        success: false,
-        error: 'Prêmio já foi solicitado anteriormente'
-      })
-    const usuario = await User.findById(usuarioId)
-    if (!usuario)
-      return res
-        .status(404)
-        .json({ success: false, error: 'Usuário não encontrado' })
+    }
+
+    console.log(`💰 Lock adquirido por ${usuario.nome} - Rodada ${rodada.nome}`)
+
+    // 4. Só AQUI cria a solicitação
     const valorSaque = usuario.saldoPremio
-    if (valorSaque <= 0)
+    if (valorSaque <= 0) {
+      // Rollback do lock
+      await Rodada.updateOne(
+        { _id: rodadaId },
+        { $set: { premioVerdePago: false } }
+      )
       return res
         .status(400)
         .json({ success: false, error: 'Saldo insuficiente para saque' })
+    }
+
     const solicitacao = new SolicitacaoSaque({
       usuario: usuarioId,
       rodada: rodadaId,
@@ -338,15 +376,12 @@ exports.sacarPremio = async (req, res) => {
       dataSolicitacao: new Date()
     })
     await solicitacao.save()
-    await db
-      .collection('rodadas')
-      .updateOne(
-        { _id: new mongoose.Types.ObjectId(rodadaId) },
-        { $set: { premioVerdePago: true } }
-      )
+
     console.log(
       `💰 Solicitação de saque criada por ${usuario.nome} - Rodada ${rodada.nome}`
     )
+
+    // 5. Notifica admin (não bloqueia)
     try {
       const emailController = require('./emailController')
       await emailController.notificarAdminNovaSolicitacao(
@@ -357,6 +392,7 @@ exports.sacarPremio = async (req, res) => {
     } catch (emailError) {
       console.error('❌ Erro ao notificar admin:', emailError)
     }
+
     res.json({
       success: true,
       message:
@@ -366,5 +402,45 @@ exports.sacarPremio = async (req, res) => {
   } catch (error) {
     console.error('\n💥 ERRO AO SOLICITAR SAQUE:', error)
     res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+// ===========================================
+// Rodadas prestes a girar (7/8 ou 8/8 pagos)
+// ===========================================
+exports.rodadasEmGiro = async (req, res) => {
+  try {
+    const rodadas = await Rodada.find({ status: 'em_andamento' })
+      .select(
+        '_id numero nome participantes.cor participantes.depositoConfirmado'
+      )
+      .lean()
+
+    const emGiro = rodadas
+      .map(r => {
+        const vermelhos = r.participantes.filter(p => p.cor === 'vermelho')
+        const pagos = vermelhos.filter(v => v.depositoConfirmado).length
+        return {
+          _id: r._id,
+          numero: r.numero,
+          nome: r.nome,
+          pagos,
+          total: vermelhos.length,
+          faltam: Math.max(0, vermelhos.length - pagos)
+        }
+      })
+      .filter(r => r.total === 8 && r.faltam > 0 && r.faltam <= 2)
+      .sort((a, b) => a.faltam - b.faltam || a.numero - b.numero)
+
+    res.json({
+      success: true,
+      data: {
+        total: emGiro.length,
+        rodadas: emGiro.slice(0, 5)
+      }
+    })
+  } catch (error) {
+    console.error('❌ [rodadasEmGiro]', error.message)
+    res.status(500).json({ success: false, error: 'Erro ao carregar' })
   }
 }

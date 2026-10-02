@@ -36,7 +36,7 @@ const colors = {
 }
 
 function logSuccess (msg) {
-  console.log(`${colors.green}✅ ${msg}${colors.reset}`)
+  console.log(`${colors.green}${msg}${colors.reset}`)
 }
 function logError (msg) {
   console.log(`${colors.red}❌ ${msg}${colors.reset}`)
@@ -320,7 +320,7 @@ async function mostrarStatus () {
     const totalPart = rodada.participantes.length
     let statusIcon =
       rodada.status === 'concluida'
-        ? '✅'
+        ? ''
         : rodada.status === 'em_andamento'
         ? '🔄'
         : '⏳'
@@ -358,7 +358,7 @@ async function mostrarStatus () {
           amarelo: '🟡',
           concluido: '🏆'
         }[p.cor] || '⚪'
-      const pagoIcon = p.depositoConfirmado ? '✅' : '⏳'
+      const pagoIcon = p.depositoConfirmado ? '' : '⏳'
       console.log(
         `         ${corEmoji} ${user?.nome || p.usuario} (${p.cor}) ${
           p.cor === 'vermelho' ? pagoIcon : ''
@@ -435,7 +435,7 @@ async function main () {
       const novaRodada = await Rodada.findById(id)
       if (novaRodada) {
         console.log(
-          `   ✅ ${novaRodada.nome} criada (${novaRodada.participantes.length}/15 participantes)`
+          `   ${novaRodada.nome} criada (${novaRodada.participantes.length}/15 participantes)`
         )
       }
     }
@@ -451,7 +451,7 @@ async function main () {
     await salvarCredenciaisComRodadas()
     await salvarResumoRodadas()
 
-    logSection('✅ TESTE CONCLUÍDO COM SUCESSO!')
+    logSection('TESTE CONCLUÍDO COM SUCESSO!')
     const totalUsuarios = await User.countDocuments()
     const usuariosEmRodadas = await User.countDocuments({
       aguardandoVermelho: false
@@ -461,8 +461,8 @@ async function main () {
     })
 
     console.log(`\n📊 RESUMO FINAL:`)
-    console.log(`   ✅ Total de usuários: ${totalUsuarios}`)
-    console.log(`   ✅ Usuários em rodadas: ${usuariosEmRodadas}`)
+    console.log(`   Total de usuários: ${totalUsuarios}`)
+    console.log(`   Usuários em rodadas: ${usuariosEmRodadas}`)
     console.log(`   ⏳ Usuários na fila: ${usuariosAguardando}`)
 
     console.log(`\n🔑 CREDENCIAIS PARA LOGIN:`)

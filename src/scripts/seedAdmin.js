@@ -21,9 +21,9 @@ async function criarAdmin() {
         if (adminExiste) {
             if (adminExiste.role !== 'admin') {
                 await User.findByIdAndUpdate(adminExiste._id, { role: 'admin' });
-                console.log('✅ Usuário atualizado para ADMIN:', adminEmail);
+                console.log('Usuário atualizado para ADMIN:', adminEmail);
             } else {
-                console.log('✅ Admin já existe:', adminEmail);
+                console.log('Admin já existe:', adminEmail);
             }
             admin = adminExiste;
         } else {
@@ -51,7 +51,7 @@ async function criarAdmin() {
 
             console.log(`
                 ========================================
-                ✅ ADMIN CRIADO COM SUCESSO!
+                ADMIN CRIADO COM SUCESSO!
                 ========================================
                 📧 Email: ${adminEmail}
                 🔑 Senha: ${adminSenha}
@@ -94,7 +94,7 @@ async function criarAdmin() {
             console.log(`   5. A partir daí, a progressão gera novas rodadas\n`);
 
         } else {
-            console.log(`\n✅ Sistema já possui ${totalRodadas} rodada(s). Nada a fazer.\n`);
+            console.log(`\nSistema já possui ${totalRodadas} rodada(s). Nada a fazer.\n`);
         }
 
     } catch (error) {

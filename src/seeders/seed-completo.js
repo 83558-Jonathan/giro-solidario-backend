@@ -111,12 +111,12 @@ async function seedCompleto() {
       const exists = await users.findOne({ email: usuario.email });
       if (!exists) {
         await users.insertOne(usuario);
-        console.log(`  ✅ Usuário criado: ${usuario.nome}`);
+        console.log(`  Usuário criado: ${usuario.nome}`);
       }
     }
     
     const total = await users.countDocuments();
-    console.log(`${colors.green}✅ Seed concluído! Total de usuários: ${total}${colors.reset}`);
+    console.log(`${colors.green}Seed concluído! Total de usuários: ${total}${colors.reset}`);
     
   } catch (error) {
     console.error('❌ Erro no seed:', error);

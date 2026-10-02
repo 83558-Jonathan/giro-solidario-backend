@@ -19,9 +19,23 @@ const TAXA_PIX = parseFloat(process.env.ABACATE_PIX_FEE) || 0.8
 // Valor mínimo para saque (não permite sacar menos que o prêmio)
 const VALOR_MINIMO_SAQUE = PREMIO_VERDE
 
-// Cálculos derivados (calculados uma vez, aqui)
+// Cálculos derivados
 const TOTAL_ARRECADADO = VALOR_VERMELHO * TOTAL_VERMELHOS
 const MARGEM_PLATAFORMA = TOTAL_ARRECADADO - PREMIO_VERDE
+
+// ===========================================
+// FORMATAÇÃO (usado nos emails e relatórios)
+// ===========================================
+function formatarMoeda (valor) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(Number(valor) || 0)
+}
+
+// Strings pré-formatadas (evita recomputar toda hora)
+const VALOR_VERMELHO_TEXTO = formatarMoeda(VALOR_VERMELHO) // "R$ 20,00"
+const PREMIO_VERDE_TEXTO = formatarMoeda(PREMIO_VERDE)     // "R$ 100,00"
 
 module.exports = {
   // Valores principais
@@ -39,6 +53,11 @@ module.exports = {
   TAXA_PIX,
   VALOR_MINIMO_SAQUE,
 
+  // Texto pré-formatado (usado nos templates de email)
+  VALOR_VERMELHO_TEXTO,
+  PREMIO_VERDE_TEXTO,
+
   // Utilitário
+  formatarMoeda,
   MOEDA: 'BRL'
 }

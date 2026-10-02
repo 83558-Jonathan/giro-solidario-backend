@@ -7,7 +7,7 @@ const User = require("../models/User");
 
 async function main() {
   await mongoose.connect("mongodb://localhost:27017/giro-solidario");
-  console.log("✅ Conectado\n");
+  console.log("Conectado\n");
 
   // Buscar rodadas em andamento
   const rodadas = await Rodada.find({ status: "em_andamento" });
@@ -49,16 +49,16 @@ async function main() {
         }
 
         console.log(
-          `      ✅ Transação criada para ${usuario?.nome || vermelhoId} (R$ ${valor})`,
+          `      Transação criada para ${usuario?.nome || vermelhoId} (R$ ${valor})`,
         );
       }
 
       await rodada.save();
       console.log(
-        `   ✅ ${rodada.vermelhos.length} transações criadas (R$ ${valor} cada)!\n`,
+        `   ${rodada.vermelhos.length} transações criadas (R$ ${valor} cada)!\n`,
       );
     } else if (existentes > 0) {
-      console.log(`   ✅ Transações já existem\n`);
+      console.log(`   Transações já existem\n`);
     } else {
       console.log(`   ⚠️ Nenhum vermelho encontrado\n`);
     }
@@ -69,7 +69,7 @@ async function main() {
   const transacoesPendentes = await Transacao.countDocuments({
     status: "pendente",
   });
-  const valorTotalPendente = transacoesPendentes * 150; // ✅ AJUSTADO: cálculo com novo valor
+  const valorTotalPendente = transacoesPendentes * 150; // AJUSTADO: cálculo com novo valor
 
   console.log(`📊 RESUMO:`);
   console.log(`   Total de transações: ${totalTransacoes}`);
@@ -77,7 +77,7 @@ async function main() {
   console.log(`   Valor total pendente: R$ ${valorTotalPendente.toFixed(2)}`);
 
   await mongoose.disconnect();
-  console.log("\n✅ Concluído! Agora execute pagar-todos-vermelhos.js");
+  console.log("\nConcluído! Agora execute pagar-todos-vermelhos.js");
 }
 
 main();

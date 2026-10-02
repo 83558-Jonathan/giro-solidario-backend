@@ -7,52 +7,42 @@ const Rodada = require('../models/Rodada')
 const User = require('../models/User')
 const ChatMessage = require('../models/ChatMessage')
 
-// ===========================================
-// VARIÁVEL GLOBAL PARA O SOCKET.IO
-// ===========================================
+// NOVO: serviços de engajamento
+const pushService = require('../services/pushService')
+const activityService = require('../services/activityService')
+const notificationService = require('../services/notificationService')
+const badgeService = require('../services/badgeService')
+
 let io = null
 let rodadaServiceInstance = null
 
 function initializeIo (socketIo) {
   io = socketIo
-  console.log('✅ io inicializado no pixController')
+  console.log('io inicializado no pixController')
 }
 
 function setRodadaService (service) {
   rodadaServiceInstance = service
-  console.log('✅ RodadaService injetado no pixController')
+  console.log('RodadaService injetado no pixController')
 }
 
 const { VALOR_VERMELHO, TAXA_PIX } = require('../config/constantes')
 const pagamentosProcessados = new Map()
 
-// ===========================================
-// AUXILIAR: montar payload V2 (transparent create)
-// ⚠️ NÃO enviamos `customer` porque o cadastro atual
-// não coleta cellphone, e a AbacatePay V2 exige
-// name + taxId + email + cellphone TODOS juntos.
-// ===========================================
 function montarPayloadPixV2 (transacao) {
   const valorCentavos = Math.round(VALOR_VERMELHO * 100)
-
   return {
     method: 'PIX',
     data: {
       amount: valorCentavos,
       description: `Giro Premiado - ${transacao.pagador?.nome || 'Usuário'}`,
       expiresIn: 3600,
-      // ✅ externalId DIRETO em data (não dentro de metadata)
       externalId: transacao._id.toString()
     }
   }
 }
 
-// ===========================================
-// AUXILIAR: consultar status no endpoint CORRETO da V2
-// ===========================================
 async function consultarStatusTransparenteV2 (cobrancaId) {
-  // ✅ /v2/transparents/check?id=... é o endpoint correto
-  // para consultar status de checkout transparente (PIX/Boleto).
   const response = await abacateV2.get('/v2/transparents/check', {
     params: { id: cobrancaId }
   })
@@ -93,7 +83,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       transacao.status === 'cancelado'
     ) {
       console.log(
-        `⚠️ [${source}] Transação ${transacaoId} está com status ${transacao.status}. Não processar pagamento.`
+        `⚠️ [${source}] Transação ${transacaoId} está com status ${transacao.status}.`
       )
       pagamentosProcessados.delete(transacaoId)
       return { success: false, message: 'Transação expirada ou cancelada' }
@@ -170,7 +160,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     if (io) {
       const mensagemPagamento = new ChatMessage({
         rodadaId: rodada._id,
-        mensagem: `✅ ${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avançar.`,
+        mensagem: `${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avançar.`,
         tipo: 'sistema',
         acao: 'pagamento_confirmado',
         createdAt: new Date()
@@ -196,29 +186,84 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       usuario.rodadaBloqueada = null
       await usuario.save()
       console.log(
-        `✅ [${source}] Usuário ${usuario.nome} removido da fila após pagamento`
+        `[${source}] Usuário ${usuario.nome} removido da fila após pagamento`
       )
     }
 
     console.log(
-      `✅ [${source}] Participante ${participante.usuario} marcado como pago`
+      `[${source}] Participante ${participante.usuario} marcado como pago`
     )
     console.log(`📊 [${source}] Progresso: ${pagos.length}/${vermelhos.length}`)
 
+    // ===========================================
+    // NOVO: BADGES
+    // ===========================================
+    if (usuario) {
+      const tempoDesdeEntrada = participante.dataEntrada
+        ? Date.now() - new Date(participante.dataEntrada).getTime()
+        : null
+      badgeService
+        .verificarAposPagamento(usuario._id, tempoDesdeEntrada)
+        .catch(err => console.error('❌ [badge]', err.message))
+    }
+
+    // ===========================================
+    // NOVO: ACTIVITY LOG (feed global)
+    // ===========================================
+    if (usuario) {
+      activityService
+        .pagamento(usuario._id, usuario.nome, rodada._id, VALOR_VERMELHO)
+        .catch(err => console.error('❌ [activity]', err.message))
+    }
+
+    // ===========================================
+    // NOVO: PUSH + NOTIFICAÇÃO para outros vermelhos (faltam pagar)
+    // ===========================================
+    const outrosVermelhos = vermelhos.filter(
+      v =>
+        !v.depositoConfirmado &&
+        v.usuario.toString() !== transacao.pagador.toString()
+    )
+    if (outrosVermelhos.length && faltam > 0 && faltam <= 3) {
+      const payload = pushService.templates.pagamentoConfirmado(
+        nomePagador.split(' ')[0],
+        faltam,
+        vermelhos.length
+      )
+      const ids = outrosVermelhos.map(v => v.usuario)
+      pushService
+        .enviarParaUsuarios(ids, payload)
+        .catch(err => console.error('❌ [push]', err.message))
+
+      // Também cria notificação in-app pra cada um
+      for (const ov of outrosVermelhos) {
+        notificationService
+          .pagamentoConfirmado(ov.usuario, nomePagador.split(' ')[0])
+          .catch(() => {})
+      }
+    }
+
+    // Se todos pagaram, avisa todos os participantes
     if (pagos.length === vermelhos.length && vermelhos.length === 8) {
       console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`)
+
+      // NOVO: push pra todos da rodada
+      const todosIds = rodada.participantes.map(p => p.usuario)
+      pushService
+        .enviarParaUsuarios(todosIds, pushService.templates.rodadaVaiAvancar())
+        .catch(() => {})
+
       if (!rodada.todosDepositaram) {
         rodada.todosDepositaram = true
         rodada.dataTodosDepositaram = new Date()
         await rodada.save()
       }
+
       try {
         if (rodadaServiceInstance) {
           await rodadaServiceInstance.avancarRodada(rodada._id)
         } else {
-          console.error(
-            `❌ [${source}] RodadaService não injetado! Não foi possível avançar a rodada.`
-          )
+          console.error(`❌ [${source}] RodadaService não injetado!`)
         }
         if (io) {
           io.to(`rodada-${rodada._id}`).emit('rodada-atualizada', {
@@ -227,7 +272,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
           })
         }
         console.log(
-          `✅ [${source}] Rodada ${rodada.nome} avançada com sucesso!`
+          `[${source}] Rodada ${rodada.nome} avançada com sucesso!`
         )
       } catch (err) {
         console.error(`❌ [${source}] Erro ao avançar rodada:`, err)
@@ -257,7 +302,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 }
 
 // ===========================================
-// CRIAR COBRANÇA PIX (V2)
+// CRIAR COBRANÇA PIX (V2) — igual, sem mudanças
 // ===========================================
 const criarCobrancaPix = async (req, res) => {
   try {
@@ -285,7 +330,6 @@ const criarCobrancaPix = async (req, res) => {
       })
 
     const payload = montarPayloadPixV2(transacao)
-
     console.log(
       '📦 [criarCobrancaPix] Payload V2:',
       JSON.stringify(payload, null, 2)
@@ -357,7 +401,6 @@ const criarCobrancaPix = async (req, res) => {
           'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
       })
     }
-
     res.status(500).json({
       success: false,
       error: apiError || 'Erro ao gerar PIX. Tente novamente.'
@@ -366,7 +409,7 @@ const criarCobrancaPix = async (req, res) => {
 }
 
 // ===========================================
-// VERIFICAR STATUS (V2) — usando /v2/transparents/check
+// VERIFICAR STATUS (V2)
 // ===========================================
 const verificarStatus = async (req, res) => {
   try {
@@ -397,36 +440,27 @@ const verificarStatus = async (req, res) => {
 
     if (transacao.cobrancaId && !expirado) {
       try {
-        // ✅ V2: endpoint correto para checkout transparente
         const pixData = await consultarStatusTransparenteV2(
           transacao.cobrancaId
         )
         const statusApi = pixData?.status?.toUpperCase?.()
-
         console.log(
           `[verificarStatus] cobrancaId=${transacao.cobrancaId} → status=${statusApi}`
         )
 
-        // V2 retorna "PAID" quando o PIX é confirmado
         if (statusApi === 'PAID') {
           await processarPagamentoComControle(transacaoId, 'verificarStatus')
         } else if (statusApi === 'EXPIRED' || statusApi === 'CANCELLED') {
-          // Marca como expirada se ainda não estiver
           if (transacao.status === 'pendente') {
             transacao.status = 'cancelada_expirada'
             await transacao.save()
-            console.log(
-              `⚠️ [verificarStatus] Transação ${transacaoId} marcada como ${statusApi}`
-            )
           }
         }
       } catch (apiError) {
         const status = apiError.response?.status
         if (status === 400) {
-          // "Transaction not found" — geralmente payload antigo/teste. Ignora.
           console.warn(
-            `⚠️ [verificarStatus] AbacatePay não achou a transação (400):`,
-            apiError.response?.data?.error
+            `⚠️ [verificarStatus] AbacatePay não achou a transação (400)`
           )
         } else {
           console.error(
@@ -457,7 +491,7 @@ const verificarStatus = async (req, res) => {
 }
 
 // ===========================================
-// RENOVAR COBRANÇA (V2)
+// RENOVAR COBRANÇA (V2) — igual
 // ===========================================
 const renovarCobrancaPix = async (req, res) => {
   try {
@@ -492,7 +526,6 @@ const renovarCobrancaPix = async (req, res) => {
       })
 
     const payload = montarPayloadPixV2(transacao)
-
     console.log(
       '📦 [renovarCobrancaPix] Payload V2:',
       JSON.stringify(payload, null, 2)
@@ -551,7 +584,6 @@ const renovarCobrancaPix = async (req, res) => {
           'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
       })
     }
-
     res.status(500).json({
       success: false,
       error: apiError || 'Erro ao renovar PIX. Tente novamente.'
@@ -560,7 +592,7 @@ const renovarCobrancaPix = async (req, res) => {
 }
 
 // ===========================================
-// CANCELAR EXPIRADO (DELETA USUÁRIO)
+// CANCELAR EXPIRADO — igual
 // ===========================================
 const cancelarExpirado = async (req, res) => {
   const { transacaoId } = req.body
@@ -582,9 +614,6 @@ const cancelarExpirado = async (req, res) => {
       'participantes.cor': 'vermelho'
     })
     if (!rodada) {
-      console.log(
-        `[CANCELAR-EXPIRADO] Rodada não encontrada para transacao ${transacaoId}`
-      )
       if (transacao.status === 'cancelada_expirada')
         return res.json({
           success: true,
@@ -593,11 +622,7 @@ const cancelarExpirado = async (req, res) => {
       return res.status(404).json({ error: 'Rodada não encontrada' })
     }
 
-    console.log(
-      `[CANCELAR-EXPIRADO] Rodada encontrada: ${rodada.nome} (${rodada._id})`
-    )
-
-    const updateResult = await Rodada.updateOne(
+    await Rodada.updateOne(
       { _id: rodada._id },
       {
         $pull: {
@@ -609,13 +634,6 @@ const cancelarExpirado = async (req, res) => {
         $unset: { verde: usuarioId }
       }
     )
-
-    if (updateResult.modifiedCount === 0)
-      console.log(`[CANCELAR-EXPIRADO] Nenhum documento alterado.`)
-    else
-      console.log(
-        `[CANCELAR-EXPIRADO] Participante removido da rodada via $pull.`
-      )
 
     const rodadaAtualizada = await Rodada.findById(rodada._id)
     const vermelhosRestantes = rodadaAtualizada.participantes.filter(
@@ -635,9 +653,7 @@ const cancelarExpirado = async (req, res) => {
     const usuario = await User.findById(usuarioId)
     if (usuario) {
       await User.deleteOne({ _id: usuarioId })
-      console.log(
-        `🗑️ [CANCELAR-EXPIRADO] Usuário ${usuario.nome} (${usuarioId}) deletado por expiração manual.`
-      )
+      console.log(`🗑️ [CANCELAR-EXPIRADO] Usuário ${usuario.nome} deletado.`)
     }
 
     res.json({
@@ -651,7 +667,7 @@ const cancelarExpirado = async (req, res) => {
 }
 
 // ===========================================
-// PROCESSAR TRANSAÇÕES EXPIRADAS (JOB)
+// PROCESSAR TRANSAÇÕES EXPIRADAS (JOB) — igual
 // ===========================================
 async function processarTransacoesExpiradas () {
   const agora = new Date()
@@ -671,9 +687,6 @@ async function processarTransacoesExpiradas () {
         'participantes.transacaoId': transacao._id
       })
       if (!rodada) {
-        console.log(
-          `[JOB] Transação ${transacao._id} expirada, mas usuário não está mais na rodada. Cancelando transação.`
-        )
         transacao.status = 'cancelada_expirada'
         await transacao.save()
         continue
@@ -706,13 +719,13 @@ async function processarTransacoesExpiradas () {
       if (usuario) {
         await User.deleteOne({ _id: usuarioId })
         console.log(
-          `🗑️ [JOB] Usuário ${usuario.nome} (${usuarioId}) deletado por inadimplência.`
+          `🗑️ [JOB] Usuário ${usuario.nome} deletado por inadimplência.`
         )
       }
 
       if (io)
         io.to(`rodada-${rodada._id}`).emit('usuario-removido', {
-          usuarioId: usuarioId,
+          usuarioId,
           rodadaId: rodada._id,
           motivo: 'expirado'
         })
@@ -723,7 +736,7 @@ async function processarTransacoesExpiradas () {
 }
 
 // ===========================================
-// ENVIAR PIX (PAYOUT) PARA SAQUE DO VERDE (V2)
+// ENVIAR PIX (PAYOUT) — igual
 // ===========================================
 const enviarPixSaque = async (
   valor,
@@ -732,9 +745,8 @@ const enviarPixSaque = async (
   solicitacaoId,
   usuarioNome
 ) => {
-  if (!chavePix || !tipoChavePix) {
+  if (!chavePix || !tipoChavePix)
     throw new Error('Chave PIX ou tipo não informados')
-  }
 
   const valorComTaxa = valor + TAXA_PIX
   const valorCentavos = Math.round(valorComTaxa * 100)
@@ -761,22 +773,19 @@ const enviarPixSaque = async (
     amount: valorCentavos,
     externalId: solicitacaoId.toString(),
     description: `Saque Giro Premiado - ${usuarioNome}`,
-    pix: {
-      key: chavePix,
-      type: tipoApi
-    }
+    pix: { key: chavePix, type: tipoApi }
   }
 
   console.log(
     `💸 Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valorComTaxa.toFixed(
       2
-    )} (inclui taxa de R$ ${TAXA_PIX.toFixed(2)})`
+    )}`
   )
 
   try {
     const response = await abacateV2.post('/v2/pix/send', payload)
     const transferId = response.data.data?.id || response.data.id
-    console.log(`✅ PIX de saque enviado com sucesso. ID: ${transferId}`)
+    console.log(`PIX de saque enviado. ID: ${transferId}`)
     return { success: true, transferId }
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message
@@ -786,7 +795,7 @@ const enviarPixSaque = async (
 }
 
 // ===========================================
-// REMOVER VERMELHOS INADIMPLENTES (JOB HORÁRIO)
+// REMOVER VERMELHOS INADIMPLENTES — igual
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
@@ -794,7 +803,7 @@ async function removerVermelhosInadimplentes () {
   const dataLimite = new Date(agora.getTime() - UMA_HORA_MS)
 
   console.log(
-    `\n🧹 [JOB-HORARIO] Removendo vermelhos inadimplentes há mais de 1 hora (limite: ${dataLimite.toISOString()})`
+    `\n🧹 [JOB-HORARIO] Removendo vermelhos inadimplentes há mais de 1 hora`
   )
 
   const rodadas = await Rodada.find({
@@ -828,11 +837,7 @@ async function removerVermelhosInadimplentes () {
 
     if (participantesParaRemover.length === 0) continue
 
-    console.log(
-      `   Rodada ${rodada.nome} (${rodada._id}): ${participantesParaRemover.length} vermelho(s) inadimplente(s) por tempo.`
-    )
     let modificado = false
-
     for (const p of participantesParaRemover) {
       const usuarioId = p.usuario.toString()
       const transacaoId = p.transacaoId
@@ -873,9 +878,7 @@ async function removerVermelhosInadimplentes () {
     }
   }
 
-  console.log(
-    `✅ [JOB-HORARIO] Total de vermelhos removidos (e usuários deletados): ${totalRemovidos}`
-  )
+  console.log(`[JOB-HORARIO] Total removidos: ${totalRemovidos}`)
 }
 
 module.exports = {

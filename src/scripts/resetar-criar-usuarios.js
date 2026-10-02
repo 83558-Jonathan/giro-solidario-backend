@@ -20,6 +20,9 @@ const colors = {
   bright: '\x1b[1m'
 }
 
+// Email do admin — alinhado com server.js + .env
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@giropremiados.com.br'
+
 async function resetarECriarUsuarios () {
   let verdeId = null
   let verdeNome = 'N/A'
@@ -39,38 +42,86 @@ async function resetarECriarUsuarios () {
     const collections = await db.listCollections().toArray()
     for (const col of collections) {
       await db.collection(col.name).drop()
-      console.log(`   ✅ Deletada: ${col.name}`)
+      console.log(`   Deletada: ${col.name}`)
     }
 
-    // 2. RECRIAR COLLECTIONS
+    // 2. RECRIAR COLLECTIONS (agora com as 3 novas)
     console.log(`\n${colors.cyan}📁 Criando collections...${colors.reset}`)
 
-    await db.createCollection('users')
-    await db.createCollection('rodadas')
-    await db.createCollection('transacaos')
-    await db.createCollection('solicitacaosaques')
-    await db.createCollection('chatmessages')
-    await db.createCollection('configuracoes')
+    const COLLECTIONS = [
+      'users',
+      'rodadas',
+      'transacaos',
+      'solicitacaosaques',
+      'chatmessages',
+      'configuracoes',
+      'activitylogs',
+      'notificacaos',
+      'subscriptions'
+    ]
 
-    console.log(`   ✅ 6 collections criadas`)
+    for (const name of COLLECTIONS) {
+      await db.createCollection(name)
+    }
+    console.log(`   ${COLLECTIONS.length} collections criadas`)
 
     // 3. CRIAR ÍNDICES
     console.log(`\n${colors.cyan}🔍 Criando índices...${colors.reset}`)
 
     await db.collection('users').createIndex({ email: 1 }, { unique: true })
     await db.collection('users').createIndex({ cpf: 1 }, { unique: true })
+    await db
+      .collection('users')
+      .createIndex({ codigoConvite: 1 }, { unique: true, sparse: true })
     await db.collection('rodadas').createIndex({ numero: 1 }, { unique: true })
     await db.collection('transacaos').createIndex({ createdAt: -1 })
+    await db.collection('transacaos').createIndex({ pagador: 1, status: 1 })
+    await db.collection('activitylogs').createIndex({ createdAt: -1 })
+    await db
+      .collection('notificacaos')
+      .createIndex({ usuario: 1, lida: 1, createdAt: -1 })
+    await db
+      .collection('subscriptions')
+      .createIndex({ endpoint: 1 }, { unique: true })
 
-    console.log(`   ✅ Índices criados`)
+    console.log(`   Índices criados`)
 
-    // 4. CRIAR USUÁRIOS (TOTAL: 15 - 1 admin + 14 comuns)
+    // 4. CRIAR USUÁRIOS (15 total: 1 admin + 14 comuns)
     console.log(`\n${colors.cyan}👥 Criando 15 usuários...${colors.reset}`)
 
     const salt = await bcrypt.genSalt(10)
     const hash = await bcrypt.hash('123456', salt)
+    const agora = new Date()
 
-    // Lista de usuários comuns (14 usuários)
+    // Campos comuns a todos os usuários (aplicam defaults do schema manualmente)
+    const defaultsUser = {
+      telefone: null,
+      chavePix: null,
+      tipoChavePix: null,
+      role: 'user',
+      status: 'ativo',
+      onboardingCompleto: false,
+      ultimoAcesso: agora,
+      badges: [],
+      codigoConvite: null,
+      indicadoPor: null,
+      meusIndicados: [],
+      totalIndicacoes: 0,
+      indicacoesConfirmadas: 0,
+      aguardandoVermelho: false,
+      posicaoFila: null,
+      dataEntradaFila: null,
+      rodadaBloqueada: null,
+      saldo: 0,
+      totalGanho: 0,
+      saldoPremio: 0,
+      resetPasswordToken: null,
+      resetPasswordExpires: null,
+      createdAt: agora,
+      updatedAt: agora
+    }
+
+    // Lista de usuários comuns (14)
     const usuariosComuns = [
       { nome: 'João Silva', email: 'joao@email.com', cpf: '11111111111' },
       { nome: 'Maria Santos', email: 'maria@email.com', cpf: '22222222222' },
@@ -96,32 +147,29 @@ async function resetarECriarUsuarios () {
       { nome: 'Igor Rodrigues', email: 'igor@email.com', cpf: '14141414141' }
     ]
 
-    // Criar admin (1)
-    const admin = {
+    // 4.1 Criar admin
+    const adminDoc = {
+      ...defaultsUser,
       nome: 'Administrador',
-      email: 'admin@girosolidario.com',
+      email: ADMIN_EMAIL,
       telefone: '11999999999',
       cpf: '00000000000',
-      chavePix: 'admin@girosolidario.com',
+      chavePix: ADMIN_EMAIL,
       tipoChavePix: 'email',
       senha: hash,
       role: 'admin',
-      status: 'ativo',
       codigoConvite: 'CONVITE-ADMIN',
-      saldoPremio: 0,
-      totalGanho: 0,
-      aguardandoVermelho: false,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      onboardingCompleto: true // admin não precisa de tour
     }
 
-    await db.collection('users').insertOne(admin)
-    console.log(`   ✅ 1. Administrador (admin@girosolidario.com)`)
+    await db.collection('users').insertOne(adminDoc)
+    console.log(`   1. Administrador (${ADMIN_EMAIL})`)
 
-    // Criar usuários comuns (14)
+    // 4.2 Criar usuários comuns (14)
     for (let i = 0; i < usuariosComuns.length; i++) {
       const u = usuariosComuns[i]
       await db.collection('users').insertOne({
+        ...defaultsUser,
         nome: u.nome,
         email: u.email,
         telefone: '119' + Math.floor(10000000 + Math.random() * 90000000),
@@ -129,26 +177,21 @@ async function resetarECriarUsuarios () {
         chavePix: u.email,
         tipoChavePix: 'email',
         senha: hash,
-        role: 'user',
-        status: 'ativo',
-        codigoConvite: 'CONVITE-' + u.nome.split(' ')[0].toUpperCase(),
-        saldoPremio: 0,
-        totalGanho: 0,
-        aguardandoVermelho: false,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        codigoConvite:
+          'CONVITE-' + u.nome.split(' ')[0].toUpperCase() +
+          '-' + Math.random().toString(36).substring(2, 5).toUpperCase()
       })
-      console.log(`   ✅ ${i + 2}. ${u.nome} - ${u.email}`)
+      console.log(`   ${i + 2}. ${u.nome} - ${u.email}`)
     }
 
     // 5. VERIFICAR TOTAL
     const total = await db.collection('users').countDocuments()
     console.log(
-      `\n${colors.green}✅ TOTAL DE USUÁRIOS: ${total}/15${colors.reset}`
+      `\n${colors.green}TOTAL DE USUÁRIOS: ${total}/15${colors.reset}`
     )
     console.log(`   Admin: 1, Comuns: ${total - 1}`)
 
-    // 6. CRIAR CONFIGURAÇÕES INICIAIS
+    // 6. CRIAR CONFIGURAÇÕES
     console.log(`\n${colors.cyan}⚙️ Criando configurações...${colors.reset}`)
 
     const configuracoes = [
@@ -185,22 +228,20 @@ async function resetarECriarUsuarios () {
     for (const config of configuracoes) {
       await db.collection('configuracoes').insertOne({
         ...config,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        createdAt: agora,
+        updatedAt: agora
       })
     }
-    console.log(`   ✅ 3 configurações criadas`)
+    console.log(`   3 configurações criadas`)
 
     // 7. CRIAR RODADA #1 COM 15 PARTICIPANTES
     console.log(
       `\n${colors.cyan}🎯 Criando Rodada #1 com 15 participantes...${colors.reset}`
     )
 
-    // Buscar todos os usuários
     const todosUsuarios = await db.collection('users').find({}).toArray()
 
     if (todosUsuarios.length === 15) {
-      // Criar rodada #1
       const rodada1 = {
         numero: 1,
         nome: 'Rodada #1',
@@ -215,26 +256,28 @@ async function resetarECriarUsuarios () {
         premioVerdePago: false,
         historicoMovimentacoes: [],
         rodadasGeradas: [],
-        createdAt: new Date(),
-        updatedAt: new Date()
+        rodadaOrigem: null,
+        dataInicio: null,
+        dataFim: null,
+        dataTodosDepositaram: null,
+        createdAt: agora,
+        updatedAt: agora
       }
 
-      // Adicionar todos como amarelos
       todosUsuarios.forEach((user, index) => {
         rodada1.participantes.push({
           usuario: user._id,
           cor: 'amarelo',
           posicao: index + 1,
-          dataEntrada: new Date(),
+          dataEntrada: agora,
           depositoConfirmado: false
         })
       })
 
-      // Inserir rodada
       const result = await db.collection('rodadas').insertOne(rodada1)
-      console.log(`   ✅ Rodada #1 criada com ID: ${result.insertedId}`)
+      console.log(`   Rodada #1 criada com ID: ${result.insertedId}`)
 
-      // Embaralhar participantes
+      // Embaralhar
       let shuffled = [...rodada1.participantes]
       for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1))
@@ -248,7 +291,6 @@ async function resetarECriarUsuarios () {
       for (let i = 3; i < 7; i++) shuffled[i].cor = 'azul'
       for (let i = 7; i < 15; i++) shuffled[i].cor = 'vermelho'
 
-      // Coletar IDs
       verdeId = shuffled[0].usuario
       const pretosIds = [shuffled[1].usuario, shuffled[2].usuario]
       const azuisIds = []
@@ -257,17 +299,15 @@ async function resetarECriarUsuarios () {
       for (let i = 3; i < 7; i++) azuisIds.push(shuffled[i].usuario)
       for (let i = 7; i < 15; i++) vermelhosIds.push(shuffled[i].usuario)
 
-      // Buscar nome do verde
       const verdeUser = await db.collection('users').findOne({ _id: verdeId })
       verdeNome = verdeUser?.nome || 'N/A'
 
-      // Atualizar rodada
       await db.collection('rodadas').updateOne(
         { _id: result.insertedId },
         {
           $set: {
             status: 'em_andamento',
-            dataInicio: new Date(),
+            dataInicio: agora,
             participantes: shuffled,
             verde: verdeId,
             pretos: pretosIds,
@@ -277,7 +317,7 @@ async function resetarECriarUsuarios () {
         }
       )
 
-      // 7.1 CRIAR TRANSAÇÕES PARA OS 8 VERMELHOS
+      // 7.1 TRANSAÇÕES PARA OS 8 VERMELHOS
       console.log(
         `\n${colors.cyan}💸 Criando ${TOTAL_VERMELHOS} transações de R$ ${VALOR_VERMELHO}...${colors.reset}`
       )
@@ -295,16 +335,21 @@ async function resetarECriarUsuarios () {
           valorPago: VALOR_VERMELHO,
           rodada: result.insertedId,
           status: 'pendente',
+          comprovante: null,
+          cobrancaId: null,
+          dataConfirmacao: null,
+          confirmadoPor: null,
           metadata: {},
-          createdAt: new Date(),
-          updatedAt: new Date()
+          motivoCancelamento: null,
+          dataCancelamento: null,
+          createdAt: agora,
+          updatedAt: agora
         }
 
         const transacaoResult = await db
           .collection('transacaos')
           .insertOne(transacao)
 
-        // Associar transação ao participante
         await db.collection('rodadas').updateOne(
           {
             _id: result.insertedId,
@@ -318,7 +363,7 @@ async function resetarECriarUsuarios () {
         )
 
         console.log(
-          `   ✅ ${usuarioVermelho?.nome || 'N/A'}: R$ ${VALOR_VERMELHO}`
+          `   ${usuarioVermelho?.nome || 'N/A'}: R$ ${VALOR_VERMELHO}`
         )
       }
 
@@ -331,7 +376,7 @@ async function resetarECriarUsuarios () {
       console.log(`\n   💰 Total arrecadado: R$ ${TOTAL_ARRECADADO}`)
       console.log(`   🎁 Prêmio do verde: R$ ${PREMIO_VERDE}`)
       console.log(`   📈 Margem da plataforma: R$ ${MARGEM_PLATAFORMA}`)
-      console.log(`\n   ✅ Rodada #1 iniciada com sucesso!`)
+      console.log(`\n   Rodada #1 iniciada com sucesso!`)
     } else {
       console.log(
         `   ❌ Erro: Esperado 15 usuários, mas encontrado ${todosUsuarios.length}`
@@ -340,10 +385,10 @@ async function resetarECriarUsuarios () {
 
     // 8. RESUMO FINAL
     console.log(
-      `\n${colors.green}${colors.bright}✅ RESET COMPLETO!${colors.reset}`
+      `\n${colors.green}${colors.bright}RESET COMPLETO!${colors.reset}`
     )
     console.log(`\n${colors.yellow}📋 CREDENCIAIS DE ACESSO:${colors.reset}`)
-    console.log(`   👑 Admin: admin@girosolidario.com / 123456`)
+    console.log(`   👑 Admin: ${ADMIN_EMAIL} / 123456`)
     console.log(
       `   👤 Usuários: joao@email.com, maria@email.com, etc. / 123456`
     )
@@ -357,6 +402,10 @@ async function resetarECriarUsuarios () {
     console.log(`   💰 Total arrecadado por rodada: R$ ${TOTAL_ARRECADADO}`)
     console.log(`   📈 Margem da plataforma: R$ ${MARGEM_PLATAFORMA}`)
     console.log(`   💳 Taxa de saque (PIX): R$ ${TAXA_PIX}`)
+    console.log(
+      `\n${colors.yellow}👉 Próximo passo: com backend ligado, rode em outro terminal:${colors.reset}`
+    )
+    console.log(`   node src/scripts/pagar-todos-vermelhos.js\n`)
   } catch (error) {
     console.error(`${colors.red}❌ ERRO:${colors.reset}`, error.message)
     console.error(error.stack)
@@ -368,5 +417,4 @@ async function resetarECriarUsuarios () {
   }
 }
 
-// Executar
 resetarECriarUsuarios()

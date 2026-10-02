@@ -33,7 +33,7 @@ const transporter = nodemailer.createTransport({
 ;(async () => {
   try {
     await transporter.verify()
-    console.log('✅ SMTP configurado corretamente')
+    console.log('SMTP configurado corretamente')
   } catch (error) {
     console.error('❌ Erro na conexão SMTP:', error.message)
   }
@@ -777,7 +777,7 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '✅',
+    emoji: '',
     titulo: 'Seu saque foi aprovado!',
     subtitulo: `PIX de ${valorFmt} enviado`,
     conteudo,
@@ -789,7 +789,7 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
     await transporter.sendMail({
       from: FROM(),
       to: usuario.email,
-      subject: `✅ Saque de ${valorFmt} aprovado e enviado!`,
+      subject: `Saque de ${valorFmt} aprovado e enviado!`,
       html
     })
     console.log(`📧 [email] Saque aprovado enviado para ${usuario.email}`)
