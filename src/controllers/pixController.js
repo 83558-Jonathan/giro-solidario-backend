@@ -1,13 +1,9 @@
-// ===========================================
-// pixController.js — Migrado 100% para AbacatePay V2
-// ===========================================
 const { abacateV2 } = require('../config/abacate')
 const Transacao = require('../models/Transacao')
 const Rodada = require('../models/Rodada')
 const User = require('../models/User')
 const ChatMessage = require('../models/ChatMessage')
 
-// NOVO: serviços de engajamento
 const pushService = require('../services/pushService')
 const activityService = require('../services/activityService')
 const notificationService = require('../services/notificationService')
@@ -26,7 +22,12 @@ function setRodadaService (service) {
   console.log('RodadaService injetado no pixController')
 }
 
-const { VALOR_VERMELHO, TAXA_PIX } = require('../config/constantes')
+const {
+  VALOR_VERMELHO,
+  TAXA_PIX,
+  COMISSAO_INDICACAO
+} = require('../config/constantes')
+
 const pagamentosProcessados = new Map()
 
 function montarPayloadPixV2 (transacao) {
@@ -35,7 +36,7 @@ function montarPayloadPixV2 (transacao) {
     method: 'PIX',
     data: {
       amount: valorCentavos,
-      description: `Giro Premiado - ${transacao.pagador?.nome || 'Usuário'}`,
+      description: `Giro Premiado - ${transacao.pagador?.nome || 'Usuario'}`,
       expiresIn: 3600,
       externalId: transacao._id.toString()
     }
@@ -50,20 +51,20 @@ async function consultarStatusTransparenteV2 (cobrancaId) {
 }
 
 // ===========================================
-// AUXILIAR: processar pagamento com controle de duplicidade
+// PROCESSAR PAGAMENTO COM CONTROLE DE DUPLICIDADE
 // ===========================================
 async function processarPagamentoComControle (transacaoId, source = 'webhook') {
   if (pagamentosProcessados.has(transacaoId)) {
     const processadoEm = pagamentosProcessados.get(transacaoId)
     const segundosDesdeProcessamento = (Date.now() - processadoEm) / 1000
     console.log(
-      `⚠️ [${source}] Pagamento ${transacaoId} já foi processado há ${segundosDesdeProcessamento.toFixed(
+      `[${source}] Pagamento ${transacaoId} ja foi processado ha ${segundosDesdeProcessamento.toFixed(
         1
       )}s. Ignorando.`
     )
     return {
       success: false,
-      message: 'Pagamento já processado',
+      message: 'Pagamento ja processado',
       jaProcessado: true
     }
   }
@@ -73,9 +74,9 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
   try {
     const transacao = await Transacao.findById(transacaoId)
     if (!transacao) {
-      console.error(`❌ [${source}] Transação não encontrada: ${transacaoId}`)
+      console.error(`[${source}] Transacao nao encontrada: ${transacaoId}`)
       pagamentosProcessados.delete(transacaoId)
-      return { success: false, message: 'Transação não encontrada' }
+      return { success: false, message: 'Transacao nao encontrada' }
     }
 
     if (
@@ -83,26 +84,26 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       transacao.status === 'cancelado'
     ) {
       console.log(
-        `⚠️ [${source}] Transação ${transacaoId} está com status ${transacao.status}.`
+        `[${source}] Transacao ${transacaoId} esta com status ${transacao.status}.`
       )
       pagamentosProcessados.delete(transacaoId)
-      return { success: false, message: 'Transação expirada ou cancelada' }
+      return { success: false, message: 'Transacao expirada ou cancelada' }
     }
 
     if (transacao.status === 'confirmado') {
       console.log(
-        `⚠️ [${source}] Transação ${transacaoId} já estava confirmada. Ignorando.`
+        `[${source}] Transacao ${transacaoId} ja estava confirmada. Ignorando.`
       )
       pagamentosProcessados.delete(transacaoId)
       return {
         success: true,
-        message: 'Transação já confirmada',
+        message: 'Transacao ja confirmada',
         jaProcessado: true
       }
     }
 
     console.log(
-      `💰 [${source}] Processando pagamento para transação: ${transacaoId}`
+      `[${source}] Processando pagamento para transacao: ${transacaoId}`
     )
 
     transacao.status = 'confirmado'
@@ -111,28 +112,28 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 
     const rodada = await Rodada.findById(transacao.rodada)
     if (!rodada) {
-      console.error(`❌ [${source}] Rodada não encontrada: ${transacao.rodada}`)
+      console.error(`[${source}] Rodada nao encontrada: ${transacao.rodada}`)
       pagamentosProcessados.delete(transacaoId)
-      return { success: false, message: 'Rodada não encontrada' }
+      return { success: false, message: 'Rodada nao encontrada' }
     }
 
     const participante = rodada.participantes.find(
       p => p.usuario.toString() === transacao.pagador.toString()
     )
     if (!participante) {
-      console.error(`❌ [${source}] Participante não encontrado na rodada`)
+      console.error(`[${source}] Participante nao encontrado na rodada`)
       pagamentosProcessados.delete(transacaoId)
-      return { success: false, message: 'Participante não encontrado' }
+      return { success: false, message: 'Participante nao encontrado' }
     }
 
     if (participante.depositoConfirmado === true) {
       console.log(
-        `⚠️ [${source}] Participante já estava marcado como pago. Ignorando.`
+        `[${source}] Participante ja estava marcado como pago. Ignorando.`
       )
       pagamentosProcessados.delete(transacaoId)
       return {
         success: true,
-        message: 'Participante já pago',
+        message: 'Participante ja pago',
         jaProcessado: true
       }
     }
@@ -141,7 +142,59 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     participante.dataDeposito = new Date()
 
     const usuarioPagador = await User.findById(transacao.pagador)
-    const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguém'
+    const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguem'
+
+    // ===========================================
+    // FIX: fallback para participante.indicadoPor
+    // ===========================================
+    const indicadorId =
+      usuarioPagador?.indicadoPor || participante.indicadoPor || null
+
+    if (indicadorId && !participante.comissaoPaga) {
+      try {
+        const indicador = await User.findById(indicadorId).select(
+          'nome saldoPremio'
+        )
+
+        if (indicador) {
+          await User.updateOne(
+            { _id: indicador._id },
+            {
+              $inc: {
+                saldoPremio: COMISSAO_INDICACAO,
+                totalComissao: COMISSAO_INDICACAO,
+                totalIndicacoesComissionadas: 1
+              }
+            }
+          )
+
+          participante.comissaoPaga = true
+
+          console.log(
+            `[${source}] Comissao de R$ ${COMISSAO_INDICACAO} creditada para ${indicador.nome} (indicou ${usuarioPagador.nome})`
+          )
+
+          activityService
+            .comissaoRecebida(
+              indicador._id,
+              indicador.nome,
+              usuarioPagador.nome,
+              COMISSAO_INDICACAO
+            )
+            .catch(err => console.error('[activity comissao]', err.message))
+
+          notificationService
+            .comissaoRecebida(
+              indicador._id,
+              usuarioPagador.nome.split(' ')[0],
+              COMISSAO_INDICACAO
+            )
+            .catch(err => console.error('[notif comissao]', err.message))
+        }
+      } catch (err) {
+        console.error(`[${source}] Erro ao creditar comissao:`, err.message)
+      }
+    }
 
     const vermelhos = rodada.participantes.filter(p => p.cor === 'vermelho')
     const pagos = vermelhos.filter(v => v.depositoConfirmado === true)
@@ -160,7 +213,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     if (io) {
       const mensagemPagamento = new ChatMessage({
         rodadaId: rodada._id,
-        mensagem: `${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avançar.`,
+        mensagem: `${nomePagador} realizou o pagamento! Faltam ${faltam} pagamento(s) para a rodada avancar.`,
         tipo: 'sistema',
         acao: 'pagamento_confirmado',
         createdAt: new Date()
@@ -186,39 +239,30 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       usuario.rodadaBloqueada = null
       await usuario.save()
       console.log(
-        `[${source}] Usuário ${usuario.nome} removido da fila após pagamento`
+        `[${source}] Usuario ${usuario.nome} removido da fila apos pagamento`
       )
     }
 
     console.log(
       `[${source}] Participante ${participante.usuario} marcado como pago`
     )
-    console.log(`📊 [${source}] Progresso: ${pagos.length}/${vermelhos.length}`)
+    console.log(`[${source}] Progresso: ${pagos.length}/${vermelhos.length}`)
 
-    // ===========================================
-    // NOVO: BADGES
-    // ===========================================
     if (usuario) {
       const tempoDesdeEntrada = participante.dataEntrada
         ? Date.now() - new Date(participante.dataEntrada).getTime()
         : null
       badgeService
         .verificarAposPagamento(usuario._id, tempoDesdeEntrada)
-        .catch(err => console.error('❌ [badge]', err.message))
+        .catch(err => console.error('[badge]', err.message))
     }
 
-    // ===========================================
-    // NOVO: ACTIVITY LOG (feed global)
-    // ===========================================
     if (usuario) {
       activityService
         .pagamento(usuario._id, usuario.nome, rodada._id, VALOR_VERMELHO)
-        .catch(err => console.error('❌ [activity]', err.message))
+        .catch(err => console.error('[activity]', err.message))
     }
 
-    // ===========================================
-    // NOVO: PUSH + NOTIFICAÇÃO para outros vermelhos (faltam pagar)
-    // ===========================================
     const outrosVermelhos = vermelhos.filter(
       v =>
         !v.depositoConfirmado &&
@@ -233,9 +277,8 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       const ids = outrosVermelhos.map(v => v.usuario)
       pushService
         .enviarParaUsuarios(ids, payload)
-        .catch(err => console.error('❌ [push]', err.message))
+        .catch(err => console.error('[push]', err.message))
 
-      // Também cria notificação in-app pra cada um
       for (const ov of outrosVermelhos) {
         notificationService
           .pagamentoConfirmado(ov.usuario, nomePagador.split(' ')[0])
@@ -243,11 +286,9 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       }
     }
 
-    // Se todos pagaram, avisa todos os participantes
     if (pagos.length === vermelhos.length && vermelhos.length === 8) {
-      console.log(`🎉 [${source}] TODOS OS 8 VERMELHOS PAGARAM!`)
+      console.log(`[${source}] TODOS OS 8 VERMELHOS PAGARAM!`)
 
-      // NOVO: push pra todos da rodada
       const todosIds = rodada.participantes.map(p => p.usuario)
       pushService
         .enviarParaUsuarios(todosIds, pushService.templates.rodadaVaiAvancar())
@@ -263,7 +304,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
         if (rodadaServiceInstance) {
           await rodadaServiceInstance.avancarRodada(rodada._id)
         } else {
-          console.error(`❌ [${source}] RodadaService não injetado!`)
+          console.error(`[${source}] RodadaService nao injetado!`)
         }
         if (io) {
           io.to(`rodada-${rodada._id}`).emit('rodada-atualizada', {
@@ -271,18 +312,16 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
             status: 'concluida'
           })
         }
-        console.log(
-          `[${source}] Rodada ${rodada.nome} avançada com sucesso!`
-        )
+        console.log(`[${source}] Rodada ${rodada.nome} avancada com sucesso!`)
       } catch (err) {
-        console.error(`❌ [${source}] Erro ao avançar rodada:`, err)
+        console.error(`[${source}] Erro ao avancar rodada:`, err)
       }
     }
 
     setTimeout(() => {
       pagamentosProcessados.delete(transacaoId)
       console.log(
-        `🧹 [${source}] Cache do pagamento ${transacaoId} removido após 10 minutos`
+        `[${source}] Cache do pagamento ${transacaoId} removido apos 10 minutos`
       )
     }, 10 * 60 * 1000)
 
@@ -293,7 +332,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     }
   } catch (error) {
     console.error(
-      `❌ [${source}] Erro ao processar pagamento ${transacaoId}:`,
+      `[${source}] Erro ao processar pagamento ${transacaoId}:`,
       error
     )
     pagamentosProcessados.delete(transacaoId)
@@ -302,7 +341,7 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 }
 
 // ===========================================
-// CRIAR COBRANÇA PIX (V2) — igual, sem mudanças
+// CRIAR COBRANCA PIX (V2)
 // ===========================================
 const criarCobrancaPix = async (req, res) => {
   try {
@@ -310,7 +349,7 @@ const criarCobrancaPix = async (req, res) => {
     if (!transacaoId)
       return res
         .status(400)
-        .json({ success: false, error: 'transacaoId é obrigatório' })
+        .json({ success: false, error: 'transacaoId e obrigatorio' })
 
     const transacao = await Transacao.findById(transacaoId)
       .populate('pagador', 'nome email cpf')
@@ -318,20 +357,20 @@ const criarCobrancaPix = async (req, res) => {
     if (!transacao)
       return res
         .status(404)
-        .json({ success: false, error: 'Transação não encontrada' })
+        .json({ success: false, error: 'Transacao nao encontrada' })
     if (transacao.status === 'confirmado')
       return res
         .status(400)
-        .json({ success: false, error: 'Esta transação já foi paga' })
+        .json({ success: false, error: 'Esta transacao ja foi paga' })
     if (transacao.status === 'cancelada_expirada')
       return res.status(400).json({
         success: false,
-        error: 'Transação expirada. Não é possível gerar novo PIX.'
+        error: 'Transacao expirada. Nao e possivel gerar novo PIX.'
       })
 
     const payload = montarPayloadPixV2(transacao)
     console.log(
-      '📦 [criarCobrancaPix] Payload V2:',
+      '[criarCobrancaPix] Payload V2:',
       JSON.stringify(payload, null, 2)
     )
 
@@ -373,10 +412,10 @@ const criarCobrancaPix = async (req, res) => {
           VALOR_VERMELHO,
           transacao.rodada
         )
-        console.log(`📧 Email com QR Code enviado para ${usuario.email}`)
+        console.log(`Email com QR Code enviado para ${usuario.email}`)
       }
     } catch (emailError) {
-      console.error('❌ Erro ao enviar email com QR Code:', emailError.message)
+      console.error('Erro ao enviar email com QR Code:', emailError.message)
     }
 
     res.json({
@@ -392,13 +431,13 @@ const criarCobrancaPix = async (req, res) => {
   } catch (error) {
     const status = error.response?.status
     const apiError = error.response?.data?.error || error.message
-    console.error('❌ Erro ao criar QR Code PIX (v2):', { status, apiError })
+    console.error('Erro ao criar QR Code PIX (v2):', { status, apiError })
 
     if (status === 401 || /invalid or inactive api key/i.test(apiError)) {
       return res.status(503).json({
         success: false,
         error:
-          'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
+          'Servico de pagamento temporariamente indisponivel. Contate o suporte.'
       })
     }
     res.status(500).json({
@@ -418,7 +457,7 @@ const verificarStatus = async (req, res) => {
     if (!transacao)
       return res
         .status(404)
-        .json({ success: false, error: 'Transação não encontrada' })
+        .json({ success: false, error: 'Transacao nao encontrada' })
 
     let expirado = false
     if (
@@ -445,7 +484,7 @@ const verificarStatus = async (req, res) => {
         )
         const statusApi = pixData?.status?.toUpperCase?.()
         console.log(
-          `[verificarStatus] cobrancaId=${transacao.cobrancaId} → status=${statusApi}`
+          `[verificarStatus] cobrancaId=${transacao.cobrancaId} -> status=${statusApi}`
         )
 
         if (statusApi === 'PAID') {
@@ -460,11 +499,11 @@ const verificarStatus = async (req, res) => {
         const status = apiError.response?.status
         if (status === 400) {
           console.warn(
-            `⚠️ [verificarStatus] AbacatePay não achou a transação (400)`
+            `[verificarStatus] AbacatePay nao achou a transacao (400)`
           )
         } else {
           console.error(
-            '❌ Erro ao consultar status (v2):',
+            'Erro ao consultar status (v2):',
             apiError.response?.data || apiError.message
           )
         }
@@ -485,13 +524,13 @@ const verificarStatus = async (req, res) => {
       expirado: finalExpirado
     })
   } catch (error) {
-    console.error('❌ Erro ao verificar status:', error)
+    console.error('Erro ao verificar status:', error)
     res.status(500).json({ success: false, error: 'Erro ao verificar status' })
   }
 }
 
 // ===========================================
-// RENOVAR COBRANÇA (V2) — igual
+// RENOVAR COBRANCA (V2)
 // ===========================================
 const renovarCobrancaPix = async (req, res) => {
   try {
@@ -499,7 +538,7 @@ const renovarCobrancaPix = async (req, res) => {
     if (!transacaoId)
       return res
         .status(400)
-        .json({ success: false, error: 'transacaoId é obrigatório' })
+        .json({ success: false, error: 'transacaoId e obrigatorio' })
 
     const transacao = await Transacao.findById(transacaoId).populate(
       'pagador',
@@ -508,11 +547,11 @@ const renovarCobrancaPix = async (req, res) => {
     if (!transacao)
       return res
         .status(404)
-        .json({ success: false, error: 'Transação não encontrada' })
+        .json({ success: false, error: 'Transacao nao encontrada' })
     if (transacao.status !== 'pendente')
       return res.status(400).json({
         success: false,
-        error: 'Não é possível renovar esta cobrança – status inválido'
+        error: 'Nao e possivel renovar esta cobranca - status invalido'
       })
 
     const aindaNaRodada = await Rodada.findOne({
@@ -522,12 +561,12 @@ const renovarCobrancaPix = async (req, res) => {
     if (!aindaNaRodada)
       return res.status(400).json({
         success: false,
-        error: 'Você não está mais na rodada. Renovação não permitida.'
+        error: 'Voce nao esta mais na rodada. Renovacao nao permitida.'
       })
 
     const payload = montarPayloadPixV2(transacao)
     console.log(
-      '📦 [renovarCobrancaPix] Payload V2:',
+      '[renovarCobrancaPix] Payload V2:',
       JSON.stringify(payload, null, 2)
     )
 
@@ -575,13 +614,13 @@ const renovarCobrancaPix = async (req, res) => {
   } catch (error) {
     const status = error.response?.status
     const apiError = error.response?.data?.error || error.message
-    console.error('❌ Erro ao renovar PIX (v2):', { status, apiError })
+    console.error('Erro ao renovar PIX (v2):', { status, apiError })
 
     if (status === 401 || /invalid or inactive api key/i.test(apiError)) {
       return res.status(503).json({
         success: false,
         error:
-          'Serviço de pagamento temporariamente indisponível. Contate o suporte.'
+          'Servico de pagamento temporariamente indisponivel. Contate o suporte.'
       })
     }
     res.status(500).json({
@@ -592,7 +631,7 @@ const renovarCobrancaPix = async (req, res) => {
 }
 
 // ===========================================
-// CANCELAR EXPIRADO — igual
+// CANCELAR EXPIRADO
 // ===========================================
 const cancelarExpirado = async (req, res) => {
   const { transacaoId } = req.body
@@ -604,9 +643,9 @@ const cancelarExpirado = async (req, res) => {
     )
     const transacao = await Transacao.findById(transacaoId)
     if (!transacao)
-      return res.status(404).json({ error: 'Transação não encontrada' })
+      return res.status(404).json({ error: 'Transacao nao encontrada' })
     if (transacao.status === 'confirmado')
-      return res.status(400).json({ error: 'Transação já foi paga' })
+      return res.status(400).json({ error: 'Transacao ja foi paga' })
 
     const rodada = await Rodada.findOne({
       'participantes.transacaoId': transacaoId,
@@ -617,9 +656,9 @@ const cancelarExpirado = async (req, res) => {
       if (transacao.status === 'cancelada_expirada')
         return res.json({
           success: true,
-          message: 'Participante já havia sido removido'
+          message: 'Participante ja havia sido removido'
         })
-      return res.status(404).json({ error: 'Rodada não encontrada' })
+      return res.status(404).json({ error: 'Rodada nao encontrada' })
     }
 
     await Rodada.updateOne(
@@ -653,21 +692,21 @@ const cancelarExpirado = async (req, res) => {
     const usuario = await User.findById(usuarioId)
     if (usuario) {
       await User.deleteOne({ _id: usuarioId })
-      console.log(`🗑️ [CANCELAR-EXPIRADO] Usuário ${usuario.nome} deletado.`)
+      console.log(`[CANCELAR-EXPIRADO] Usuario ${usuario.nome} deletado.`)
     }
 
     res.json({
       success: true,
-      message: 'Participante removido e usuário deletado por inadimplência'
+      message: 'Participante removido e usuario deletado por inadimplencia'
     })
   } catch (error) {
     console.error('Erro no cancelarExpirado:', error)
-    res.status(500).json({ error: 'Erro interno ao processar expiração' })
+    res.status(500).json({ error: 'Erro interno ao processar expiracao' })
   }
 }
 
 // ===========================================
-// PROCESSAR TRANSAÇÕES EXPIRADAS (JOB) — igual
+// PROCESSAR TRANSACOES EXPIRADAS (JOB)
 // ===========================================
 async function processarTransacoesExpiradas () {
   const agora = new Date()
@@ -718,9 +757,7 @@ async function processarTransacoesExpiradas () {
       const usuario = await User.findById(usuarioId)
       if (usuario) {
         await User.deleteOne({ _id: usuarioId })
-        console.log(
-          `🗑️ [JOB] Usuário ${usuario.nome} deletado por inadimplência.`
-        )
+        console.log(`[JOB] Usuario ${usuario.nome} deletado por inadimplencia.`)
       }
 
       if (io)
@@ -730,13 +767,13 @@ async function processarTransacoesExpiradas () {
           motivo: 'expirado'
         })
     } catch (err) {
-      console.error(`[JOB] Erro ao processar expiração ${transacao._id}:`, err)
+      console.error(`[JOB] Erro ao processar expiracao ${transacao._id}:`, err)
     }
   }
 }
 
 // ===========================================
-// ENVIAR PIX (PAYOUT) — igual
+// ENVIAR PIX (PAYOUT)
 // ===========================================
 const enviarPixSaque = async (
   valor,
@@ -746,7 +783,7 @@ const enviarPixSaque = async (
   usuarioNome
 ) => {
   if (!chavePix || !tipoChavePix)
-    throw new Error('Chave PIX ou tipo não informados')
+    throw new Error('Chave PIX ou tipo nao informados')
 
   const valorComTaxa = valor + TAXA_PIX
   const valorCentavos = Math.round(valorComTaxa * 100)
@@ -777,7 +814,7 @@ const enviarPixSaque = async (
   }
 
   console.log(
-    `💸 Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valorComTaxa.toFixed(
+    `Enviando PIX via /v2/pix/send para ${chavePix} (${tipoApi}) valor R$ ${valorComTaxa.toFixed(
       2
     )}`
   )
@@ -789,13 +826,13 @@ const enviarPixSaque = async (
     return { success: true, transferId }
   } catch (error) {
     const errorMsg = error.response?.data?.error || error.message
-    console.error('❌ Erro ao enviar PIX de saque:', errorMsg)
-    throw new Error(`Falha na transferência: ${errorMsg}`)
+    console.error('Erro ao enviar PIX de saque:', errorMsg)
+    throw new Error(`Falha na transferencia: ${errorMsg}`)
   }
 }
 
 // ===========================================
-// REMOVER VERMELHOS INADIMPLENTES — igual
+// REMOVER VERMELHOS INADIMPLENTES
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
@@ -803,7 +840,7 @@ async function removerVermelhosInadimplentes () {
   const dataLimite = new Date(agora.getTime() - UMA_HORA_MS)
 
   console.log(
-    `\n🧹 [JOB-HORARIO] Removendo vermelhos inadimplentes há mais de 1 hora`
+    `\n[JOB-HORARIO] Removendo vermelhos inadimplentes ha mais de 1 hora`
   )
 
   const rodadas = await Rodada.find({

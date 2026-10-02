@@ -2,9 +2,6 @@ const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 
 const userSchema = new mongoose.Schema({
-  // ===========================================
-  // CAMPOS OBRIGATÓRIOS
-  // ===========================================
   nome: { type: String, required: true, trim: true },
   email: {
     type: String,
@@ -21,9 +18,6 @@ const userSchema = new mongoose.Schema({
   },
   senha: { type: String, required: true },
 
-  // ===========================================
-  // CAMPOS OPCIONAIS (cadastro simplificado não usa)
-  // ===========================================
   telefone: {
     type: String,
     required: false,
@@ -40,19 +34,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ['cpf', 'email', 'telefone', 'aleatoria'],
     default: null
-    // ⚠️ Removi o `null` de dentro do enum — não precisa estar lá,
-    // o `default: null` já cobre o caso vazio
   },
 
-  // ===========================================
-  // PERFIL / STATUS
-  // ===========================================
   role: { type: String, default: 'user' },
   status: { type: String, default: 'ativo' },
 
-  // ===========================================
-  // ONBOARDING / ENGAJAMENTO
-  // ===========================================
   onboardingCompleto: { type: Boolean, default: false },
   ultimoAcesso: { type: Date, default: Date.now },
   badges: [
@@ -63,18 +49,14 @@ const userSchema = new mongoose.Schema({
     }
   ],
 
-  // ===========================================
-  // INDICAÇÕES
-  // ===========================================
   codigoConvite: { type: String, unique: true, sparse: true },
   indicadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   meusIndicados: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   totalIndicacoes: { type: Number, default: 0 },
   indicacoesConfirmadas: { type: Number, default: 0 },
+  totalComissao: { type: Number, default: 0 },
+  totalIndicacoesComissionadas: { type: Number, default: 0 },
 
-  // ===========================================
-  // FILA / RODADAS
-  // ===========================================
   aguardandoVermelho: { type: Boolean, default: false },
   posicaoFila: { type: Number, default: null },
   dataEntradaFila: { type: Date, default: null },
@@ -84,16 +66,11 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
-  // ===========================================
-  // SALDOS
-  // ===========================================
   saldo: { type: Number, default: 0 },
   totalGanho: { type: Number, default: 0 },
   saldoPremio: { type: Number, default: 0 },
+  totalSacado: { type: Number, default: 0 },
 
-  // ===========================================
-  // RECUPERAÇÃO DE SENHA
-  // ===========================================
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
 

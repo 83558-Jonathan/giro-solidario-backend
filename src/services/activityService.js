@@ -4,19 +4,23 @@ let ioInstance = null
 
 function setIo (io) {
   ioInstance = io
-  console.log('[activityService] io injetado')
 }
 
-// Mascara o nome: "João Silva" → "João S."
 function mascararNome (nomeCompleto) {
-  if (!nomeCompleto) return 'Alguém'
+  if (!nomeCompleto) return 'Alguem'
   const partes = nomeCompleto.trim().split(/\s+/)
   if (partes.length === 1) return partes[0]
   return `${partes[0]} ${partes[1].charAt(0).toUpperCase()}.`
 }
 
-// Registra uma atividade e emite via socket (se io disponível)
-async function registrar ({ tipo, usuario, nome, rodada = null, mensagem, metadata = {} }) {
+async function registrar ({
+  tipo,
+  usuario,
+  nome,
+  rodada = null,
+  mensagem,
+  metadata = {}
+}) {
   try {
     const log = await ActivityLog.create({
       tipo,
@@ -39,12 +43,10 @@ async function registrar ({ tipo, usuario, nome, rodada = null, mensagem, metada
 
     return log
   } catch (err) {
-    console.error('❌ [activityService] Erro ao registrar:', err.message)
     return null
   }
 }
 
-// Atalhos semânticos
 const atalhos = {
   pagamento: (usuario, nome, rodada, valor) =>
     registrar({
@@ -62,7 +64,7 @@ const atalhos = {
       usuario,
       nome,
       rodada,
-      mensagem: `🏆 ${mascararNome(nome)} ganhou R$ ${valor}!`,
+      mensagem: `${mascararNome(nome)} ganhou R$ ${valor}!`,
       metadata: { valor }
     }),
 
@@ -80,7 +82,7 @@ const atalhos = {
       tipo: 'convite',
       usuario,
       nome,
-      mensagem: `🚀 ${mascararNome(nome)} fez uma indicação`,
+      mensagem: `${mascararNome(nome)} fez uma indicacao`
     }),
 
   novoIndicado: (usuario, nome, indicadoNome) =>
@@ -88,17 +90,17 @@ const atalhos = {
       tipo: 'novo_indicado',
       usuario,
       nome,
-      mensagem: `🎁 ${mascararNome(nome)} trouxe ${mascararNome(indicadoNome)}`,
+      mensagem: `${mascararNome(nome)} trouxe ${mascararNome(indicadoNome)}`,
       metadata: { indicadoNome }
     }),
 
-  rodadaAvancou: (usuario, nome, rodada) =>
+  rodadaAvancou: (usuario, nome, rodada, rodadaNome) =>
     registrar({
       tipo: 'rodada_avancou',
       usuario,
       nome,
       rodada,
-      mensagem: `🔄 ${rodada} avançou! Novas posições atribuídas`
+      mensagem: `${rodadaNome || 'Rodada'} avancou! Novas posicoes atribuidas`
     }),
 
   filaAlocado: (usuario, nome, rodada) =>
@@ -107,7 +109,18 @@ const atalhos = {
       usuario,
       nome,
       rodada,
-      mensagem: `⚡ ${mascararNome(nome)} entrou da fila para a ${rodada}`
+      mensagem: `${mascararNome(nome)} entrou da fila para a rodada`
+    }),
+
+  comissaoRecebida: (usuario, nome, indicadoNome, valor) =>
+    registrar({
+      tipo: 'comissao',
+      usuario,
+      nome,
+      mensagem: `${mascararNome(
+        nome
+      )} ganhou R$ ${valor} pela indicacao de ${mascararNome(indicadoNome)}`,
+      metadata: { valor, indicadoNome }
     })
 }
 

@@ -11,7 +11,8 @@ const activitySchema = new mongoose.Schema(
         'convite',
         'rodada_avancou',
         'fila_alocado',
-        'novo_indicado'
+        'novo_indicado',
+        'comissao'
       ],
       required: true
     },
@@ -20,7 +21,6 @@ const activitySchema = new mongoose.Schema(
       ref: 'User',
       required: true
     },
-    // Nome já "mascarado" pra exibir (ex: "João S.")
     nomeExibicao: { type: String, required: true },
     rodada: {
       type: mongoose.Schema.Types.ObjectId,
@@ -32,7 +32,6 @@ const activitySchema = new mongoose.Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      // ⏰ TTL de 7 dias — atividades antigas somem sozinhas
       expires: 60 * 60 * 24 * 7
     }
   },

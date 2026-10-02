@@ -4,10 +4,17 @@ let ioInstance = null
 
 function setIo (io) {
   ioInstance = io
-  console.log('[notificationService] io injetado')
 }
 
-async function criar ({ usuario, tipo, titulo, mensagem, icone = null, link = '/dashboard', metadata = {} }) {
+async function criar ({
+  usuario,
+  tipo,
+  titulo,
+  mensagem,
+  icone = null,
+  link = '/dashboard',
+  metadata = {}
+}) {
   try {
     const notif = await Notificacao.create({
       usuario,
@@ -34,92 +41,99 @@ async function criar ({ usuario, tipo, titulo, mensagem, icone = null, link = '/
 
     return notif
   } catch (err) {
-    console.error('❌ [notificationService] Erro:', err.message)
     return null
   }
 }
 
-// Atalhos
 const atalhos = {
   pagamentoConfirmado: (usuario, nome) =>
     criar({
       usuario,
       tipo: 'pagamento_confirmado',
-      titulo: '💰 Pagamento confirmado!',
+      titulo: 'Pagamento confirmado',
       mensagem: `${nome} pagou. Fique de olho na rodada.`,
-      icone: '💰'
+      icone: 'money'
     }),
 
   voceEVerde: (usuario, premio) =>
     criar({
       usuario,
       tipo: 'voce_e_verde',
-      titulo: '🏆 Você é o VERDE!',
+      titulo: 'Voce e o VERDE!',
       mensagem: `Aguarde os pagamentos para receber R$ ${premio}`,
-      icone: '🏆'
+      icone: 'trophy'
     }),
 
   premioLiberado: (usuario, valor) =>
     criar({
       usuario,
       tipo: 'premio_liberado',
-      titulo: '🎊 Prêmio liberado!',
-      mensagem: `R$ ${valor} disponíveis para saque`,
-      icone: '🎊'
+      titulo: 'Premio liberado!',
+      mensagem: `R$ ${valor} disponiveis para saque`,
+      icone: 'gift'
     }),
 
   novoIndicado: (usuario, nome) =>
     criar({
       usuario,
       tipo: 'novo_indicado',
-      titulo: '🎁 Novo indicado!',
+      titulo: 'Novo indicado!',
       mensagem: `${nome} se cadastrou com seu link`,
-      icone: '🎁'
+      icone: 'user-plus'
     }),
 
   filaSubiu: (usuario, posicao) =>
     criar({
       usuario,
       tipo: 'fila_subiu',
-      titulo: '📈 Você subiu na fila!',
-      mensagem: `Agora você é o ${posicao}º da fila`,
-      icone: '📈'
+      titulo: 'Voce subiu na fila!',
+      mensagem: `Agora voce e o ${posicao} da fila`,
+      icone: 'arrow-up'
     }),
 
   filaAlocado: (usuario, rodada) =>
     criar({
       usuario,
       tipo: 'fila_alocado',
-      titulo: '⚡ Sua vaga abriu!',
-      mensagem: `Você entrou na ${rodada}. Pague agora!`,
-      icone: '⚡'
+      titulo: 'Sua vaga abriu!',
+      mensagem: `Voce entrou na ${rodada}. Pague agora!`,
+      icone: 'bolt'
     }),
 
   saqueAprovado: (usuario, valor) =>
     criar({
       usuario,
       tipo: 'saque_aprovado',
-      titulo: 'Saque aprovado!',
+      titulo: 'Saque aprovado',
       mensagem: `R$ ${valor} enviados para sua chave PIX`,
-      icone: ''
+      icone: 'check'
     }),
 
   saqueRecusado: (usuario, valor, motivo) =>
     criar({
       usuario,
       tipo: 'saque_recusado',
-      titulo: '❌ Saque recusado',
+      titulo: 'Saque recusado',
       mensagem: motivo || `R$ ${valor} voltaram para seu saldo`,
-      icone: '❌'
+      icone: 'x'
     }),
 
   badgeConquistado: (usuario, badgeNome, emoji) =>
     criar({
       usuario,
       tipo: 'badge_conquistado',
-      titulo: `${emoji} Nova conquista!`,
-      mensagem: `Você ganhou: ${badgeNome}`,
+      titulo: `Nova conquista!`,
+      mensagem: `Voce ganhou: ${badgeNome}`,
       icone: emoji
+    }),
+
+  comissaoRecebida: (usuario, indicadoNome, valor) =>
+    criar({
+      usuario,
+      tipo: 'comissao_recebida',
+      titulo: 'Comissao recebida',
+      mensagem: `Voce ganhou R$ ${valor} pela indicacao de ${indicadoNome}`,
+      icone: 'money'
     })
 }
 

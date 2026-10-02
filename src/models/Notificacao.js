@@ -21,20 +21,21 @@ const notificacaoSchema = new mongoose.Schema(
         'saque_aprovado',
         'saque_recusado',
         'badge_conquistado',
+        'comissao_recebida',
         'aviso'
       ],
       required: true
     },
     titulo: { type: String, required: true, maxlength: 100 },
     mensagem: { type: String, required: true, maxlength: 300 },
-    icone: { type: String, default: null }, // emoji
+    icone: { type: String, default: null },
     link: { type: String, default: '/dashboard' },
     lida: { type: Boolean, default: false, index: true },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     createdAt: {
       type: Date,
       default: Date.now,
-      expires: 60 * 60 * 24 * 30 // 30 dias
+      expires: 60 * 60 * 24 * 30
     }
   },
   { timestamps: false }

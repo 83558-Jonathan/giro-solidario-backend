@@ -8,7 +8,14 @@ router.use(authMiddleware)
 
 router.get('/', rodadaController.listarRodadas)
 router.post('/', rodadaController.criarRodada)
-router.get('/em-giro', rodadaController.rodadasEmGiro) // ← NOVO, antes do /:id
+
+// Rotas fixas (precisam vir ANTES de /:rodadaId)
+router.post('/sacar-saldo', rodadaController.sacarSaldo)
+router.post('/jogar-novamente', rodadaController.jogarNovamente)
+router.post('/admin/forcar-alocacao-fila', rodadaController.forcarAlocacaoFila)
+router.get('/em-giro', rodadaController.rodadasEmGiro)
+
+// Rotas com parametro
 router.get('/:id', validateObjectId(['id']), rodadaController.buscarRodadaPorId)
 router.post(
   '/:rodadaId/participantes',
@@ -30,7 +37,5 @@ router.post(
   validateObjectId(['rodadaId']),
   rodadaController.sacarPremio
 )
-router.post('/jogar-novamente', rodadaController.jogarNovamente)
-router.post('/admin/forcar-alocacao-fila', rodadaController.forcarAlocacaoFila)
 
 module.exports = router
