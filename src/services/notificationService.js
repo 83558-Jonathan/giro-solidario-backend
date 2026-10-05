@@ -52,7 +52,7 @@ const atalhos = {
       tipo: 'pagamento_confirmado',
       titulo: 'Pagamento confirmado',
       mensagem: `${nome} pagou. Fique de olho na rodada.`,
-      icone: 'money'
+      icone: '💰'
     }),
 
   voceEVerde: (usuario, premio) =>
@@ -61,7 +61,7 @@ const atalhos = {
       tipo: 'voce_e_verde',
       titulo: 'Voce e o VERDE!',
       mensagem: `Aguarde os pagamentos para receber R$ ${premio}`,
-      icone: 'trophy'
+      icone: '🟢'
     }),
 
   premioLiberado: (usuario, valor) =>
@@ -70,7 +70,7 @@ const atalhos = {
       tipo: 'premio_liberado',
       titulo: 'Premio liberado!',
       mensagem: `R$ ${valor} disponiveis para saque`,
-      icone: 'gift'
+      icone: '🏆'
     }),
 
   novoIndicado: (usuario, nome) =>
@@ -79,7 +79,7 @@ const atalhos = {
       tipo: 'novo_indicado',
       titulo: 'Novo indicado!',
       mensagem: `${nome} se cadastrou com seu link`,
-      icone: 'user-plus'
+      icone: '🎁'
     }),
 
   filaSubiu: (usuario, posicao) =>
@@ -88,7 +88,7 @@ const atalhos = {
       tipo: 'fila_subiu',
       titulo: 'Voce subiu na fila!',
       mensagem: `Agora voce e o ${posicao} da fila`,
-      icone: 'arrow-up'
+      icone: '📈'
     }),
 
   filaAlocado: (usuario, rodada) =>
@@ -97,7 +97,7 @@ const atalhos = {
       tipo: 'fila_alocado',
       titulo: 'Sua vaga abriu!',
       mensagem: `Voce entrou na ${rodada}. Pague agora!`,
-      icone: 'bolt'
+      icone: '⚡'
     }),
 
   saqueAprovado: (usuario, valor) =>
@@ -106,7 +106,7 @@ const atalhos = {
       tipo: 'saque_aprovado',
       titulo: 'Saque aprovado',
       mensagem: `R$ ${valor} enviados para sua chave PIX`,
-      icone: 'check'
+      icone: '✅'
     }),
 
   saqueRecusado: (usuario, valor, motivo) =>
@@ -115,16 +115,16 @@ const atalhos = {
       tipo: 'saque_recusado',
       titulo: 'Saque recusado',
       mensagem: motivo || `R$ ${valor} voltaram para seu saldo`,
-      icone: 'x'
+      icone: '❌'
     }),
 
   badgeConquistado: (usuario, badgeNome, emoji) =>
     criar({
       usuario,
       tipo: 'badge_conquistado',
-      titulo: `Nova conquista!`,
+      titulo: 'Nova conquista!',
       mensagem: `Voce ganhou: ${badgeNome}`,
-      icone: emoji
+      icone: emoji || '🏅'
     }),
 
   comissaoRecebida: (usuario, indicadoNome, valor) =>
@@ -132,8 +132,8 @@ const atalhos = {
       usuario,
       tipo: 'comissao_recebida',
       titulo: 'Comissao recebida',
-      mensagem: `Voce ganhou R$ ${valor} pela indicacao de ${indicadoNome}`,
-      icone: 'money'
+      mensagem: `Voce recebeu R$ ${valor} pela indicacao de ${indicadoNome}`,
+      icone: '💵'
     })
 }
 

@@ -58,25 +58,25 @@ async function notificarPromocao ({ usuarioId, corAnterior, corNova, rodada }) {
       case 'azul':
         mensagemInApp =
           'Voce subiu para AZUL! Convide 2 amigos pra virar PRETO.'
-        iconeInApp = 'blue'
+        iconeInApp = '🔵'
         tituloNotif = 'Voce e AZUL!'
         break
       case 'preto':
         mensagemInApp = 'Voce subiu para PRETO! Continue firme.'
-        iconeInApp = 'black'
+        iconeInApp = '⚫'
         tituloNotif = 'Voce e PRETO!'
         break
       case 'verde':
         templatePush = pushService.templates.voceEVerde(PREMIO_VERDE)
         mensagemInApp = `Voce e o VERDE! Aguarde os pagamentos pra receber ${PREMIO_VERDE_TEXTO}.`
-        iconeInApp = 'green'
+        iconeInApp = '🟢'
         tipoNotif = 'voce_e_verde'
         tituloNotif = 'Voce e o VERDE!'
         break
       case 'concluido':
         templatePush = pushService.templates.premioLiberado(PREMIO_VERDE)
         mensagemInApp = `Parabens! ${PREMIO_VERDE_TEXTO} ja estao no seu saldo.`
-        iconeInApp = 'trophy'
+        iconeInApp = '🏆'
         tipoNotif = 'premio_liberado'
         tituloNotif = 'Premio liberado!'
         break
@@ -633,7 +633,7 @@ class RodadaService {
             tipo: 'aviso',
             titulo: 'Voce e VERMELHO!',
             mensagem: `Pague ${VALOR_VERMELHO_TEXTO} pra rodada girar.`,
-            icone: 'card'
+            icone: '💳'
           })
           .catch(() => {})
       } catch (err) {
