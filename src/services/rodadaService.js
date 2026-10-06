@@ -305,11 +305,25 @@ class RodadaService {
           await rodada.save()
           console.log(`[VERMELHO] Campo verde restaurado para ${rodada.verde}.`)
         } else {
+          // ============================================================
+          // FIX: Rodada raiz sem estrutura -> entrada como AMARELO
+          // Em vez de mandar para a fila, promove o usuario a amarelo
+          // na propria rodada. Quando ela atingir 15, iniciarRodada()
+          // sorteia as cores e cria as transacoes automaticamente.
+          // ============================================================
           console.log(
-            `[VERMELHO] Rodada ${rodada.nome} nao tem VERDE. Usuario vai para fila.`
+            `[VERMELHO] Rodada ${rodada.nome} nao tem estrutura. Promovendo usuario ${usuarioId} a AMARELO.`
           )
-          await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
-          return { rodada, transacao: null }
+          const rodadaAtualizada = await this.adicionarParticipanteAmarelo(
+            rodadaId,
+            usuarioId,
+            indicadorId
+          )
+          return {
+            rodada: rodadaAtualizada,
+            transacao: null,
+            entrouComoAmarelo: true
+          }
         }
       }
 
@@ -1884,7 +1898,9 @@ class RodadaService {
   async jogarNovamente (usuarioId) {
     try {
       console.log(`\n[REENTRADA] Usuario ${usuarioId} quer jogar novamente`)
-      const usuario = await User.findById(usuarioId)
+      // ATENCAO: trocado de "const" para "let" porque recarregamos o usuario
+      // depois da alocacao de fila (FIX).
+      let usuario = await User.findById(usuarioId)
       if (!usuario) throw new Error('Usuario nao encontrado')
 
       const saldoAtual = Number(usuario.saldoPremio) || 0
@@ -1912,6 +1928,51 @@ class RodadaService {
       }
 
       if (usuario.aguardandoVermelho) {
+        // ============================================================
+        // FIX: antes de tentar entrar, tenta alocar a fila INTEIRA.
+        // Com a promocao automatica para AMARELO nas rodadas raiz
+        // (mudanca em adicionarParticipanteVermelho), isso destrava
+        // a primeira rodada do sistema assim que ela atinge 15.
+        // ============================================================
+        try {
+          await this.alocarFilaEmTodasRodadas()
+        } catch (err) {
+          console.error('[REENTRADA] Erro ao alocar fila:', err.message)
+        }
+
+        // Recarrega o usuario — pode ter saido da fila
+        const usuarioRecarregado = await User.findById(usuarioId)
+        if (usuarioRecarregado) {
+          usuario = usuarioRecarregado
+        }
+
+        if (!usuario.aguardandoVermelho) {
+          // Foi alocado! Descobre onde e como
+          const rodadaAgora = await this.buscarRodadaAtivaDoUsuario(usuarioId)
+          if (rodadaAgora) {
+            const participanteAgora = rodadaAgora.participantes.find(
+              p => p.usuario.toString() === usuarioId.toString()
+            )
+            const corAgora = participanteAgora?.cor || 'amarelo'
+            const saldoAtualizado = Number(usuario.saldoPremio) || 0
+            return {
+              success: true,
+              message: `Voce entrou na ${
+                rodadaAgora.nome
+              } como ${corAgora.toUpperCase()}.`,
+              cor: corAgora,
+              rodadaId: rodadaAgora._id,
+              rodadaNome: rodadaAgora.nome,
+              aguardando: false,
+              pagoAutomaticamente: false,
+              saldoRestante: saldoAtualizado,
+              transacaoId: participanteAgora?.transacaoId || null
+            }
+          }
+          // Fallback: nao achou rodada (situacao atipica). Segue fluxo normal.
+        }
+
+        // ---- Fluxo original (usuario continua na fila) ----
         let rodadaExistente = await Rodada.findOne({
           status: 'em_andamento',
           $expr: {
@@ -2048,11 +2109,37 @@ class RodadaService {
           await usuario.save()
         }
 
-        await this.adicionarParticipanteVermelho(
+        const resultadoAdd = await this.adicionarParticipanteVermelho(
           rodadaParaEntrar._id,
           usuarioId,
           null
         )
+
+        // ============================================================
+        // FIX: se o usuario foi promovido a AMARELO (rodada raiz sem
+        // estrutura), retorna direto sem tentar gerar transacao — pois
+        // ainda nao existe VERDE definido nessa rodada.
+        // ============================================================
+        if (resultadoAdd && resultadoAdd.entrouComoAmarelo) {
+          const rodadaAgora = await Rodada.findById(rodadaParaEntrar._id)
+          const participanteAgora = rodadaAgora?.participantes.find(
+            p => p.usuario.toString() === usuarioId.toString()
+          )
+          const corAgora = participanteAgora?.cor || 'amarelo'
+          return {
+            success: true,
+            message: `Voce entrou na ${
+              rodadaParaEntrar.nome
+            } como ${corAgora.toUpperCase()}. Aguarde completar 15 participantes para a rodada iniciar.`,
+            cor: corAgora,
+            rodadaId: rodadaParaEntrar._id,
+            rodadaNome: rodadaParaEntrar.nome,
+            aguardando: false,
+            pagoAutomaticamente: false,
+            saldoRestante: saldoAtual,
+            transacaoId: null
+          }
+        }
 
         const verdeId = rodadaParaEntrar.verde
         let transacaoId = null
