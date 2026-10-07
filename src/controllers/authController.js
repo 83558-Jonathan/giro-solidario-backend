@@ -179,6 +179,9 @@ exports.registrar = async (req, res) => {
       email: emailNormalizado,
       cpf: cpfLimpo,
       senha: senhaHash,
+      // ✅ NOVO: chave PIX padrão = CPF (usuario pode trocar depois no perfil)
+      chavePix: cpfLimpo,
+      tipoChavePix: 'cpf',
       // NOVO: marca onboarding como não concluído
       onboardingCompleto: false,
       ultimoAcesso: new Date()
@@ -421,6 +424,7 @@ exports.registrar = async (req, res) => {
     console.log(`   Usuário: ${usuario.nome}`)
     console.log(`   Email: ${usuario.email}`)
     console.log(`   CPF: ${usuario.cpf}`)
+    console.log(`   Chave PIX: ${usuario.chavePix} (${usuario.tipoChavePix})`)
     console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
     console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
     console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
