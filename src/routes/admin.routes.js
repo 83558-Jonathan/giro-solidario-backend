@@ -21,5 +21,7 @@ router.get('/saques', adminController.getTodosSaques);
 router.post('/saques/:id/aprovar', validateObjectId(['id']), adminController.aprovarSaque);
 router.post('/saques/:id/recusar', validateObjectId(['id']), adminController.recusarSaque);
 router.get('/rodadas/:id', validateObjectId(['id']), adminController.getRodadaDetalhes);
+router.get('/usuarios', adminController.getUsuariosCompletos)
+router.get('/usuarios/:id', adminController.getUsuarioDetalhe)
 
 module.exports = router;
