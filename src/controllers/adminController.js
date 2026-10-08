@@ -92,8 +92,9 @@ exports.getUsuariosCompletos = async (req, res) => {
 
     const usuariosCompletos = await Promise.all(
       usuarios.map(async u => {
+        // ✅ FIX: removido 'participantes.usuario' do select (causava path collision)
         const rodadas = await Rodada.find({ 'participantes.usuario': u._id })
-          .select('nome numero status participantes participantes.usuario')
+          .select('nome numero status participantes')
           .lean()
 
         const rodadasJogadas = rodadas.filter(r =>
