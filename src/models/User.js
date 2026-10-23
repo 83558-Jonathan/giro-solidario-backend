@@ -10,26 +10,11 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
-  cpf: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
+  cpf: { type: String, required: true, unique: true, trim: true },
   senha: { type: String, required: true },
 
-  telefone: {
-    type: String,
-    required: false,
-    default: null,
-    trim: true
-  },
-  chavePix: {
-    type: String,
-    required: false,
-    default: null,
-    trim: true
-  },
+  telefone: { type: String, required: false, default: null, trim: true },
+  chavePix: { type: String, required: false, default: null, trim: true },
   tipoChavePix: {
     type: String,
     enum: ['cpf', 'email', 'telefone', 'aleatoria'],
@@ -56,6 +41,10 @@ const userSchema = new mongoose.Schema({
   indicacoesConfirmadas: { type: Number, default: 0 },
   totalComissao: { type: Number, default: 0 },
   totalIndicacoesComissionadas: { type: Number, default: 0 },
+
+  // ✅ NOVO: influenciador (comissão recorrente)
+  isInfluenciador: { type: Boolean, default: false },
+  dataInfluenciador: { type: Date, default: null },
 
   aguardandoVermelho: { type: Boolean, default: false },
   posicaoFila: { type: Number, default: null },

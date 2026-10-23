@@ -16,6 +16,9 @@ const notificationService = require('./notificationService')
 const badgeService = require('./badgeService')
 const emailController = require('../controllers/emailController')
 
+// ✅ NOVO: service centralizado de comissão
+const comissaoService = require('./comissaoService')
+
 const pagamentosProcessadosService = new Map()
 const processandoRodadas = new Map()
 let alocandoFila = false
@@ -305,12 +308,6 @@ class RodadaService {
           await rodada.save()
           console.log(`[VERMELHO] Campo verde restaurado para ${rodada.verde}.`)
         } else {
-          // ============================================================
-          // FIX: Rodada raiz sem estrutura -> entrada como AMARELO
-          // Em vez de mandar para a fila, promove o usuario a amarelo
-          // na propria rodada. Quando ela atingir 15, iniciarRodada()
-          // sorteia as cores e cria as transacoes automaticamente.
-          // ============================================================
           console.log(
             `[VERMELHO] Rodada ${rodada.nome} nao tem estrutura. Promovendo usuario ${usuarioId} a AMARELO.`
           )
@@ -802,63 +799,27 @@ class RodadaService {
       participante.comprovantePix = comprovanteUrl
 
       // ===========================================
-      // COMISSAO DE INDICACAO
+      // COMISSAO DE INDICACAO (unica ou recorrente)
+      // Centralizado em comissaoService — trata influenciador recorrente
       // ===========================================
-      if (!participante.comissaoPaga) {
-        try {
-          const usuarioPagador = await User.findById(transacao.pagador).select(
-            'nome indicadoPor'
-          )
+      const usuarioPagadorComissao = await User.findById(
+        transacao.pagador
+      ).select('indicadoPor')
+      const indicadorId =
+        usuarioPagadorComissao?.indicadoPor || participante.indicadoPor || null
 
-          const indicadorId =
-            usuarioPagador?.indicadoPor || participante.indicadoPor || null
+      if (indicadorId) {
+        const resultadoComissao = await comissaoService.processarComissao({
+          indicadorId,
+          indicadoId: transacao.pagador,
+          transacaoId: transacao._id,
+          rodadaId: rodada._id,
+          participanteJaRecebeu: participante.comissaoPaga === true,
+          source: 'confirmarDeposito'
+        })
 
-          if (indicadorId) {
-            const indicador = await User.findById(indicadorId).select(
-              'nome saldoPremio'
-            )
-
-            if (indicador) {
-              await User.updateOne(
-                { _id: indicador._id },
-                {
-                  $inc: {
-                    saldoPremio: COMISSAO_INDICACAO,
-                    totalComissao: COMISSAO_INDICACAO,
-                    totalIndicacoesComissionadas: 1
-                  }
-                }
-              )
-
-              participante.comissaoPaga = true
-
-              console.log(
-                `[confirmarDeposito] Comissao de R$ ${COMISSAO_INDICACAO} creditada para ${indicador.nome} (indicou ${usuarioPagador.nome})`
-              )
-
-              activityService
-                .comissaoRecebida(
-                  indicador._id,
-                  indicador.nome,
-                  usuarioPagador.nome,
-                  COMISSAO_INDICACAO
-                )
-                .catch(err => console.error('[activity comissao]', err.message))
-
-              notificationService
-                .comissaoRecebida(
-                  indicador._id,
-                  usuarioPagador.nome.split(' ')[0],
-                  COMISSAO_INDICACAO
-                )
-                .catch(err => console.error('[notif comissao]', err.message))
-            }
-          }
-        } catch (err) {
-          console.error(
-            '[confirmarDeposito] Erro ao creditar comissao:',
-            err.message
-          )
+        if (resultadoComissao.success && resultadoComissao.tipo === 'unica') {
+          participante.comissaoPaga = true
         }
       }
 
@@ -1898,8 +1859,6 @@ class RodadaService {
   async jogarNovamente (usuarioId) {
     try {
       console.log(`\n[REENTRADA] Usuario ${usuarioId} quer jogar novamente`)
-      // ATENCAO: trocado de "const" para "let" porque recarregamos o usuario
-      // depois da alocacao de fila (FIX).
       let usuario = await User.findById(usuarioId)
       if (!usuario) throw new Error('Usuario nao encontrado')
 
@@ -1928,26 +1887,18 @@ class RodadaService {
       }
 
       if (usuario.aguardandoVermelho) {
-        // ============================================================
-        // FIX: antes de tentar entrar, tenta alocar a fila INTEIRA.
-        // Com a promocao automatica para AMARELO nas rodadas raiz
-        // (mudanca em adicionarParticipanteVermelho), isso destrava
-        // a primeira rodada do sistema assim que ela atinge 15.
-        // ============================================================
         try {
           await this.alocarFilaEmTodasRodadas()
         } catch (err) {
           console.error('[REENTRADA] Erro ao alocar fila:', err.message)
         }
 
-        // Recarrega o usuario — pode ter saido da fila
         const usuarioRecarregado = await User.findById(usuarioId)
         if (usuarioRecarregado) {
           usuario = usuarioRecarregado
         }
 
         if (!usuario.aguardandoVermelho) {
-          // Foi alocado! Descobre onde e como
           const rodadaAgora = await this.buscarRodadaAtivaDoUsuario(usuarioId)
           if (rodadaAgora) {
             const participanteAgora = rodadaAgora.participantes.find(
@@ -1969,10 +1920,8 @@ class RodadaService {
               transacaoId: participanteAgora?.transacaoId || null
             }
           }
-          // Fallback: nao achou rodada (situacao atipica). Segue fluxo normal.
         }
 
-        // ---- Fluxo original (usuario continua na fila) ----
         let rodadaExistente = await Rodada.findOne({
           status: 'em_andamento',
           $expr: {
@@ -2115,11 +2064,6 @@ class RodadaService {
           null
         )
 
-        // ============================================================
-        // FIX: se o usuario foi promovido a AMARELO (rodada raiz sem
-        // estrutura), retorna direto sem tentar gerar transacao — pois
-        // ainda nao existe VERDE definido nessa rodada.
-        // ============================================================
         if (resultadoAdd && resultadoAdd.entrouComoAmarelo) {
           const rodadaAgora = await Rodada.findById(rodadaParaEntrar._id)
           const participanteAgora = rodadaAgora?.participantes.find(

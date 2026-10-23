@@ -9,6 +9,8 @@ const activityService = require('../services/activityService')
 const notificationService = require('../services/notificationService')
 const badgeService = require('../services/badgeService')
 
+const comissaoService = require('../services/comissaoService')
+
 let io = null
 let rodadaServiceInstance = null
 
@@ -22,11 +24,7 @@ function setRodadaService (service) {
   console.log('RodadaService injetado no pixController')
 }
 
-const {
-  VALOR_VERMELHO,
-  TAXA_PIX,
-  COMISSAO_INDICACAO
-} = require('../config/constantes')
+const { VALOR_VERMELHO, TAXA_PIX } = require('../config/constantes')
 
 const pagamentosProcessados = new Map()
 
@@ -145,54 +143,30 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguem'
 
     // ===========================================
-    // FIX: fallback para participante.indicadoPor
+    // COMISSAO DE INDICACAO (unica ou recorrente)
+    // A logica foi centralizada em comissaoService — trata:
+    //   - Comum: paga so 1x (comissaoPaga)
+    //   - Influenciador + indicado criado APOS virar: paga sempre (recorrente)
+    //   - Influenciador + indicado ANTERIOR: paga so 1x
+    //   - Anti-duplicidade por transacaoId (indice unique)
     // ===========================================
     const indicadorId =
       usuarioPagador?.indicadoPor || participante.indicadoPor || null
 
-    if (indicadorId && !participante.comissaoPaga) {
-      try {
-        const indicador = await User.findById(indicadorId).select(
-          'nome saldoPremio'
-        )
+    if (indicadorId) {
+      const resultadoComissao = await comissaoService.processarComissao({
+        indicadorId,
+        indicadoId: transacao.pagador,
+        transacaoId: transacao._id,
+        rodadaId: rodada._id,
+        participanteJaRecebeu: participante.comissaoPaga === true,
+        source
+      })
 
-        if (indicador) {
-          await User.updateOne(
-            { _id: indicador._id },
-            {
-              $inc: {
-                saldoPremio: COMISSAO_INDICACAO,
-                totalComissao: COMISSAO_INDICACAO,
-                totalIndicacoesComissionadas: 1
-              }
-            }
-          )
-
-          participante.comissaoPaga = true
-
-          console.log(
-            `[${source}] Comissao de R$ ${COMISSAO_INDICACAO} creditada para ${indicador.nome} (indicou ${usuarioPagador.nome})`
-          )
-
-          activityService
-            .comissaoRecebida(
-              indicador._id,
-              indicador.nome,
-              usuarioPagador.nome,
-              COMISSAO_INDICACAO
-            )
-            .catch(err => console.error('[activity comissao]', err.message))
-
-          notificationService
-            .comissaoRecebida(
-              indicador._id,
-              usuarioPagador.nome.split(' ')[0],
-              COMISSAO_INDICACAO
-            )
-            .catch(err => console.error('[notif comissao]', err.message))
-        }
-      } catch (err) {
-        console.error(`[${source}] Erro ao creditar comissao:`, err.message)
+      if (resultadoComissao.success && resultadoComissao.tipo === 'unica') {
+        // Só marca comissaoPaga para 'unica' — recorrente NÃO marca
+        // (para permitir pagar novamente nas próximas transações)
+        participante.comissaoPaga = true
       }
     }
 

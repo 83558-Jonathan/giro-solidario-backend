@@ -2,6 +2,7 @@ const User = require('../models/User')
 const Rodada = require('../models/Rodada')
 const Transacao = require('../models/Transacao')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
+const Comissao = require('../models/Comissao')
 const { enviarPixSaque } = require('./pixController')
 const mongoose = require('mongoose')
 
@@ -43,7 +44,7 @@ exports.getEstatisticas = async (req, res) => {
       status: 'confirmado'
     })
 
-    // NOVO: métricas extras
+    // Métricas extras
     const usuariosNaFila = await User.countDocuments({
       aguardandoVermelho: true
     })
@@ -79,7 +80,7 @@ exports.getEstatisticas = async (req, res) => {
 }
 
 // ===========================================
-// LISTA COMPLETA DE USUÁRIOS (com estatísticas)
+// LISTA COMPLETA DE USUÁRIOS (com estatísticas + comissões)
 // ===========================================
 exports.getUsuariosCompletos = async (req, res) => {
   try {
@@ -90,65 +91,117 @@ exports.getUsuariosCompletos = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean()
 
-    const usuariosCompletos = await Promise.all(
-      usuarios.map(async u => {
-        // ✅ FIX: removido 'participantes.usuario' do select (causava path collision)
-        const rodadas = await Rodada.find({ 'participantes.usuario': u._id })
-          .select('nome numero status participantes')
-          .lean()
+    // OTIMIZAÇÃO: busca TODAS as rodadas UMA vez
+    const todasRodadas = await Rodada.find({
+      'participantes.usuario': { $in: usuarios.map(u => u._id) }
+    })
+      .select('nome numero status participantes')
+      .lean()
 
-        const rodadasJogadas = rodadas.filter(r =>
-          r.participantes.some(p => p.usuario.toString() === u._id.toString())
-        ).length
+    // OTIMIZAÇÃO: agregação única para transações como pagador
+    const apostasPorUsuario = await Transacao.aggregate([
+      {
+        $match: {
+          status: 'confirmado',
+          pagador: { $in: usuarios.map(u => u._id) }
+        }
+      },
+      { $group: { _id: '$pagador', total: { $sum: '$valor' } } }
+    ])
+    const mapaApostas = new Map(
+      apostasPorUsuario.map(a => [a._id.toString(), a.total])
+    )
 
-        const rodadasVencidas = rodadas.filter(r =>
-          r.participantes.some(
-            p =>
-              p.usuario.toString() === u._id.toString() && p.cor === 'concluido'
-          )
-        ).length
+    // OTIMIZAÇÃO: agregação única para transações como recebedor
+    const recebidosPorUsuario = await Transacao.aggregate([
+      {
+        $match: {
+          status: 'confirmado',
+          recebedor: { $in: usuarios.map(u => u._id) }
+        }
+      },
+      { $group: { _id: '$recebedor', total: { $sum: '$valor' } } }
+    ])
+    const mapaRecebidos = new Map(
+      recebidosPorUsuario.map(r => [r._id.toString(), r.total])
+    )
 
-        // Rodada ativa
-        const rodadaAtiva = rodadas.find(r =>
-          ['aguardando', 'em_andamento'].includes(r.status)
-        )
-        const participanteAtivo = rodadaAtiva?.participantes.find(
-          p => p.usuario.toString() === u._id.toString()
-        )
-
-        // Total apostado (soma das transações confirmadas como pagador)
-        const totalApostado = await Transacao.aggregate([
-          { $match: { pagador: u._id, status: 'confirmado' } },
-          { $group: { _id: null, total: { $sum: '$valor' } } }
-        ])
-
-        // Total recebido como verde
-        const totalRecebido = await Transacao.aggregate([
-          { $match: { recebedor: u._id, status: 'confirmado' } },
-          { $group: { _id: null, total: { $sum: '$valor' } } }
-        ])
-
-        return {
-          ...u,
-          estatisticas: {
-            rodadasJogadas,
-            rodadasVencidas,
-            totalIndicacoes: (u.meusIndicados || []).length,
-            totalApostado: totalApostado[0]?.total || 0,
-            totalRecebido: totalRecebido[0]?.total || 0,
-            rodadaAtiva: rodadaAtiva
-              ? {
-                  nome: rodadaAtiva.nome,
-                  numero: rodadaAtiva.numero,
-                  status: rodadaAtiva.status,
-                  cor: participanteAtivo?.cor,
-                  depositoConfirmado: participanteAtivo?.depositoConfirmado
-                }
-              : null
+    // NOVO: contagem de comissões por usuário (batch)
+    const comissoesPorUsuario = await Comissao.aggregate([
+      { $match: { indicador: { $in: usuarios.map(u => u._id) } } },
+      {
+        $group: {
+          _id: '$indicador',
+          total: { $sum: 1 },
+          valor: { $sum: '$valor' },
+          unicas: {
+            $sum: { $cond: [{ $eq: ['$tipo', 'unica'] }, 1, 0] }
+          },
+          recorrentes: {
+            $sum: { $cond: [{ $eq: ['$tipo', 'recorrente'] }, 1, 0] }
           }
         }
-      })
+      }
+    ])
+    const mapaComissoes = new Map(
+      comissoesPorUsuario.map(c => [
+        c._id.toString(),
+        {
+          total: c.total,
+          valor: c.valor,
+          unicas: c.unicas,
+          recorrentes: c.recorrentes
+        }
+      ])
     )
+
+    const usuariosCompletos = usuarios.map(u => {
+      const uid = u._id.toString()
+
+      const rodadasDoUsuario = todasRodadas.filter(r =>
+        r.participantes.some(p => p.usuario.toString() === uid)
+      )
+
+      const rodadasJogadas = rodadasDoUsuario.length
+      const rodadasVencidas = rodadasDoUsuario.filter(r =>
+        r.participantes.some(
+          p => p.usuario.toString() === uid && p.cor === 'concluido'
+        )
+      ).length
+
+      const rodadaAtiva = rodadasDoUsuario.find(r =>
+        ['aguardando', 'em_andamento'].includes(r.status)
+      )
+      const participanteAtivo = rodadaAtiva?.participantes.find(
+        p => p.usuario.toString() === uid
+      )
+
+      return {
+        ...u,
+        estatisticas: {
+          rodadasJogadas,
+          rodadasVencidas,
+          totalIndicacoes: (u.meusIndicados || []).length,
+          totalApostado: mapaApostas.get(uid) || 0,
+          totalRecebido: mapaRecebidos.get(uid) || 0,
+          comissoes: mapaComissoes.get(uid) || {
+            total: 0,
+            valor: 0,
+            unicas: 0,
+            recorrentes: 0
+          },
+          rodadaAtiva: rodadaAtiva
+            ? {
+                nome: rodadaAtiva.nome,
+                numero: rodadaAtiva.numero,
+                status: rodadaAtiva.status,
+                cor: participanteAtivo?.cor,
+                depositoConfirmado: participanteAtivo?.depositoConfirmado
+              }
+            : null
+        }
+      }
+    })
 
     res.json({
       success: true,
@@ -223,13 +276,21 @@ exports.getUsuarioDetalhe = async (req, res) => {
       .sort({ dataSolicitacao: -1 })
       .lean()
 
+    // NOVO: comissões recebidas por este usuário
+    const comissoes = await Comissao.find({ indicador: id })
+      .populate('indicado', 'nome email')
+      .populate('rodada', 'nome numero')
+      .sort({ createdAt: -1 })
+      .lean()
+
     res.json({
       success: true,
       data: {
         usuario,
         historicoRodadas,
         transacoes,
-        saques
+        saques,
+        comissoes
       }
     })
   } catch (error) {
@@ -523,6 +584,166 @@ exports.aprovarSaque = async (req, res) => {
     })
   } catch (error) {
     console.error('Erro ao aprovar saque:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+// ===========================================
+// MARCAR/DESMARCAR INFLUENCIADOR
+// ===========================================
+exports.setInfluenciador = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { isInfluenciador } = req.body
+
+    if (typeof isInfluenciador !== 'boolean') {
+      return res
+        .status(400)
+        .json({ success: false, error: 'isInfluenciador deve ser boolean' })
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'ID inválido' })
+    }
+
+    const usuario = await User.findById(id)
+    if (!usuario) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'Usuário não encontrado' })
+    }
+
+    const eraInfluenciador = usuario.isInfluenciador === true
+
+    // Marcar como influenciador pela PRIMEIRA vez → registra a data
+    // Desmarcar NÃO limpa dataInfluenciador (direito adquirido)
+    if (isInfluenciador && !usuario.dataInfluenciador) {
+      usuario.dataInfluenciador = new Date()
+      console.log(
+        `[ADMIN][INFLUENCIADOR] ${
+          usuario.nome
+        } virou influenciador em ${usuario.dataInfluenciador.toISOString()}`
+      )
+    }
+
+    usuario.isInfluenciador = isInfluenciador
+    await usuario.save()
+
+    console.log(
+      `[ADMIN][INFLUENCIADOR] ${usuario.nome} ${
+        isInfluenciador
+          ? eraInfluenciador
+            ? 'reativado'
+            : 'MARCADO'
+          : 'DESMARCADO'
+      } como influenciador`
+    )
+
+    res.json({
+      success: true,
+      message: `Usuário ${
+        isInfluenciador ? 'marcado' : 'desmarcado'
+      } como influenciador`,
+      data: {
+        id: usuario._id,
+        nome: usuario.nome,
+        isInfluenciador: usuario.isInfluenciador,
+        dataInfluenciador: usuario.dataInfluenciador
+      }
+    })
+  } catch (error) {
+    console.error('[ADMIN][INFLUENCIADOR] Erro:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+// ===========================================
+// LISTAR COMISSÕES (com filtros)
+// ===========================================
+exports.getComissoes = async (req, res) => {
+  try {
+    const { indicadorId, tipo, from, to, limit = 200 } = req.query
+
+    const filter = {}
+    if (indicadorId && mongoose.Types.ObjectId.isValid(indicadorId)) {
+      filter.indicador = indicadorId
+    }
+    if (tipo && ['unica', 'recorrente'].includes(tipo)) {
+      filter.tipo = tipo
+    }
+    if (from || to) {
+      filter.createdAt = {}
+      if (from) filter.createdAt.$gte = new Date(from)
+      if (to) filter.createdAt.$lte = new Date(to)
+    }
+
+    const comissoes = await Comissao.find(filter)
+      .populate('indicador', 'nome email isInfluenciador')
+      .populate('indicado', 'nome email')
+      .populate('rodada', 'nome numero')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean()
+
+    const totais = await Comissao.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$tipo',
+          count: { $sum: 1 },
+          total: { $sum: '$valor' }
+        }
+      }
+    ])
+
+    res.json({
+      success: true,
+      count: comissoes.length,
+      totais,
+      data: comissoes
+    })
+  } catch (error) {
+    console.error('[ADMIN][COMISSOES] Erro:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+// ===========================================
+// COMISSÕES DE UM USUÁRIO ESPECÍFICO
+// ===========================================
+exports.getComissoesUsuario = async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'ID inválido' })
+    }
+
+    const [comissoes, totais] = await Promise.all([
+      Comissao.find({ indicador: id })
+        .populate('indicado', 'nome email')
+        .populate('rodada', 'nome numero')
+        .sort({ createdAt: -1 })
+        .lean(),
+      Comissao.aggregate([
+        { $match: { indicador: new mongoose.Types.ObjectId(id) } },
+        {
+          $group: {
+            _id: '$tipo',
+            count: { $sum: 1 },
+            total: { $sum: '$valor' }
+          }
+        }
+      ])
+    ])
+
+    res.json({
+      success: true,
+      count: comissoes.length,
+      totais,
+      data: comissoes
+    })
+  } catch (error) {
+    console.error('[ADMIN][COMISSOES-USUARIO] Erro:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 }
