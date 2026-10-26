@@ -55,14 +55,14 @@ router.get(
   adminController.getUsuarioDetalhe
 )
 
-// ✅ NOVO: marcar/desmarcar influenciador
+// marcar/desmarcar influenciador
 router.patch(
   '/usuarios/:id/influenciador',
   validateObjectId(['id']),
   adminController.setInfluenciador
 )
 
-// ✅ NOVO: comissões do usuário
+// comissões do usuário
 router.get(
   '/usuarios/:id/comissoes',
   validateObjectId(['id']),

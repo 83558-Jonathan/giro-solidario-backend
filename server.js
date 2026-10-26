@@ -233,7 +233,8 @@ app.use(
       callback(new Error('Not allowed by CORS'))
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    // ✅ FIX 1: adicionado PATCH na lista de métodos permitidos
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
@@ -374,8 +375,9 @@ app.use((req, res, next) => {
   }
 })
 
+// ✅ FIX 2: adicionado PATCH na lista de métodos permitidos pelo middleware
 app.use((req, res, next) => {
-  const allowedMethods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  const allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
   if (!allowedMethods.includes(req.method)) {
     return res.status(405).send('Method Not Allowed')
   }
