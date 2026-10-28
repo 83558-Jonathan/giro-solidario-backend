@@ -179,7 +179,6 @@ exports.registrar = async (req, res) => {
       email: emailNormalizado,
       cpf: cpfLimpo,
       senha: senhaHash,
-      // ✅ NOVO: chave PIX padrão = CPF (usuario pode trocar depois no perfil)
       chavePix: cpfLimpo,
       tipoChavePix: 'cpf',
       // NOVO: marca onboarding como não concluído
@@ -362,20 +361,10 @@ exports.registrar = async (req, res) => {
       .catch(err => console.error('❌ [email] Boas-vindas:', err.message))
 
     // 2. QR Code PIX (se gerou)
-    if (dadosPagamento && usuario.email) {
-      const rodadaPopulada = rodadaIdAdicionada
-        ? await Rodada.findById(rodadaIdAdicionada).select('nome').lean()
-        : null
-      emailController
-        .enviarEmailQrCodePix(
-          usuario,
-          { _id: dadosPagamento.id },
-          dadosPagamento.qrCode,
-          dadosPagamento.qrCodeImage,
-          dadosPagamento.valor,
-          rodadaPopulada
-        )
-        .catch(err => console.error('❌ [email] QR Code:', err.message))
+    if (dadosPagamento) {
+      console.log(
+        `[registro] Email de QR Code: enviado pelo qrCodeHelper (transacao ${dadosPagamento.id}). Nao duplicando aqui.`
+      )
     }
 
     // 3. Activity log (entrada na rodada)

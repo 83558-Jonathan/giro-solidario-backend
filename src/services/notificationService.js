@@ -106,7 +106,7 @@ const atalhos = {
       tipo: 'saque_aprovado',
       titulo: 'Saque aprovado',
       mensagem: `R$ ${valor} enviados para sua chave PIX`,
-      icone: '✅'
+      icone: ''
     }),
 
   saqueRecusado: (usuario, valor, motivo) =>

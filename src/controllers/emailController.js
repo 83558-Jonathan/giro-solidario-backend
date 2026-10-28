@@ -29,13 +29,12 @@ const transporter = nodemailer.createTransport({
   socketTimeout: 15000
 })
 
-// Verifica conexão SMTP no boot (sem debug verboso)
 ;(async () => {
   try {
     await transporter.verify()
     console.log('SMTP configurado corretamente')
   } catch (error) {
-    console.error('❌ Erro na conexão SMTP:', error.message)
+    console.error('Erro na conexao SMTP:', error.message)
   }
 })()
 
@@ -45,11 +44,11 @@ const FROM = () =>
   }>`
 
 // ===========================================
-// TEMPLATE BASE — layout compartilhado
+// TEMPLATE BASE
 // ===========================================
 function templateBase ({
   cor = '#10B981',
-  emoji = '🎉',
+  emoji = '',
   titulo = '',
   subtitulo = '',
   conteudo = '',
@@ -75,7 +74,11 @@ function templateBase ({
           <!-- HEADER -->
           <tr>
             <td style="background:linear-gradient(135deg,${cor} 0%,${cor}dd 100%);padding:32px 24px;text-align:center;">
-              <div style="font-size:44px;line-height:1;margin-bottom:8px;">${emoji}</div>
+              ${
+                emoji
+                  ? `<div style="font-size:44px;line-height:1;margin-bottom:8px;">${emoji}</div>`
+                  : ''
+              }
               <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.3px;">${titulo}</h1>
               ${
                 subtitulo
@@ -127,7 +130,7 @@ function templateBase ({
 }
 
 // ===========================================
-// AUXILIAR: caixa destacada dentro do email
+// AUXILIARES
 // ===========================================
 function boxDestaque (
   texto,
@@ -145,7 +148,7 @@ function listaPassos (passos) {
 }
 
 // ===========================================
-// EMAIL 1: Boas-vindas (cadastro)
+// EMAIL 1: Boas-vindas
 // ===========================================
 async function enviarEmailBoasVindas (
   usuario,
@@ -155,36 +158,36 @@ async function enviarEmailBoasVindas (
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
 
   let conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">Seja bem-vindo(a) ao <strong>Giro Premiado</strong>! Sua conta foi criada com sucesso. 🎊</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">Seja bem-vindo(a) ao <strong>Giro Premiado</strong>! Sua conta foi criada com sucesso.</p>
     ${boxDestaque(
-      `💰 <strong>Como funciona:</strong> 8 pessoas entram como VERMELHO pagando ${VALOR_VERMELHO_TEXTO}. O VERDE da rodada recebe <strong>${PREMIO_VERDE_TEXTO}</strong> quando todos confirmarem.`
+      `<strong>Como funciona:</strong> 8 pessoas entram como VERMELHO pagando ${VALOR_VERMELHO_TEXTO}. O VERDE da rodada recebe <strong>${PREMIO_VERDE_TEXTO}</strong> quando todos confirmarem.`
     )}
   `
 
   if (entrouNaFila) {
     conteudo += `
-      <p style="margin:0 0 12px 0;">⏳ Você entrou na <strong>FILA DE ESPERA</strong> na posição <strong>${posicaoFila}</strong>.</p>
+      <p style="margin:0 0 12px 0;">Voce entrou na <strong>FILA DE ESPERA</strong> na posicao <strong>${posicaoFila}</strong>.</p>
       ${boxDestaque(
-        `Assim que uma vaga para VERMELHO abrir, você será alocado automaticamente. Fique de olho no seu email!`,
+        `Assim que uma vaga para VERMELHO abrir, voce sera alocado automaticamente. Fique de olho no seu email!`,
         { cor: '#fef3c7', borda: '#f59e0b', textoCor: '#78350f' }
       )}
     `
   } else {
     conteudo += `
-      <p style="margin:0 0 12px 0;">🎯 Sua jornada começa agora. Compartilhe seu link de convite e venha ganhar!</p>
+      <p style="margin:0 0 12px 0;">Sua jornada comeca agora. Compartilhe seu link de convite e venha ganhar!</p>
     `
   }
 
   conteudo += `
-    <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;">💡 <strong>Dica:</strong> quanto mais pessoas você convidar, mais rápido a roda gira e mais perto você fica do prêmio.</p>
+    <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;"><strong>Dica:</strong> quanto mais pessoas voce convidar, mais rapido a roda gira e mais perto voce fica do premio.</p>
   `
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '🎊',
+    emoji: '',
     titulo: 'Bem-vindo ao Giro Premiado!',
-    subtitulo: 'Sua conta está pronta para começar',
+    subtitulo: 'Sua conta esta pronta para comecar',
     conteudo,
     ctaTexto: 'ACESSAR MEU DASHBOARD',
     ctaUrl: `${frontendUrl}/dashboard`
@@ -193,14 +196,14 @@ async function enviarEmailBoasVindas (
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: '🎊 Bem-vindo ao Giro Premiado!',
+    subject: 'Bem-vindo ao Giro Premiado!',
     html
   })
-  console.log(`📧 [email] Boas-vindas enviadas para ${usuario.email}`)
+  console.log(`[email] Boas-vindas enviadas para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 2: QR Code PIX gerado (cobrar pagamento)
+// EMAIL 2: QR Code PIX (corrigido)
 // ===========================================
 async function enviarEmailQrCodePix (
   usuario,
@@ -210,23 +213,33 @@ async function enviarEmailQrCodePix (
   valor,
   rodada
 ) {
+  // Guard clause: nunca envia email com dados incompletos
+  if (!qrCode || !qrCodeImage) {
+    console.warn(
+      `[email] enviarEmailQrCodePix ABORTADO: qrCode=${!!qrCode}, qrCodeImage=${!!qrCodeImage} (usuario=${
+        usuario?.email
+      }, transacao=${transacao?._id})`
+    )
+    return false
+  }
+
   const frontendUrl = getFrontendUrl()
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
   const nomeRodada = rodada?.nome || transacao?.rodada?.nome || 'sua rodada'
   const valorFmt = formatarMoeda(valor || VALOR_VERMELHO)
-  const srcImg = qrCodeImage?.startsWith('data:')
+  const srcImg = qrCodeImage.startsWith('data:')
     ? qrCodeImage
     : `data:image/png;base64,${qrCodeImage}`
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">🎉 <strong>Você entrou na ${nomeRodada}!</strong> Falta apenas uma etapa: efetuar o pagamento para confirmar sua vaga.</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;"><strong>Voce entrou na ${nomeRodada}!</strong> Falta apenas uma etapa: efetuar o pagamento para confirmar sua vaga.</p>
 
     ${boxDestaque(
-      `💳 <strong>Valor a pagar:</strong> ${valorFmt}<br>
-       ⏰ <strong>Prazo:</strong> 1 hora para pagar
+      `<strong>Valor a pagar:</strong> ${valorFmt}<br>
+       <strong>Prazo:</strong> 1 hora para pagar
        <br><br>
-       <span style="color:#991b1b;">⚠️ Se não pagar no prazo, sua vaga será liberada automaticamente para outro participante.</span>`
+       <span style="color:#991b1b;">Atencao: se nao pagar no prazo, sua vaga sera liberada automaticamente para outro participante.</span>`
     )}
 
     <div style="text-align:center;margin:24px 0;">
@@ -234,26 +247,26 @@ async function enviarEmailQrCodePix (
       <img src="${srcImg}" alt="QR Code PIX" width="220" height="220" style="border:8px solid #ffffff;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.08);" />
     </div>
 
-    <p style="margin:16px 0 8px 0;font-size:13px;color:#6b7280;"><strong>Ou copie o código PIX (copia e cola):</strong></p>
-    <div style="background:#f3f4f6;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;word-break:break-all;color:#4b5563;max-height:80px;overflow:hidden;">
+    <p style="margin:16px 0 8px 0;font-size:13px;color:#6b7280;"><strong>Ou copie o codigo PIX (copia e cola):</strong></p>
+    <div style="background:#f3f4f6;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;word-break:break-all;color:#4b5563;">
       ${qrCode}
     </div>
 
     ${listaPassos([
-      'Abra o app do seu banco e escolha a opção <strong>PIX</strong>',
-      'Escaneie o QR Code ou cole o código copia-e-cola',
-      'Confirme o pagamento — a confirmação é automática',
-      'Pronto! Sua vaga está garantida 🎯'
+      'Abra o app do seu banco e escolha a opcao <strong>PIX</strong>',
+      'Escaneie o QR Code ou cole o codigo copia-e-cola',
+      'Confirme o pagamento - a confirmacao e automatica',
+      'Pronto! Sua vaga esta garantida'
     ])}
 
-    <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;">💡 <strong>Depois de pagar, a rodada avança mais rápido e você fica mais perto do prêmio de ${PREMIO_VERDE_TEXTO}!</strong></p>
+    <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;"><strong>Depois de pagar, a rodada avanca mais rapido e voce fica mais perto do premio de ${PREMIO_VERDE_TEXTO}!</strong></p>
   `
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '💳',
+    emoji: '',
     titulo: 'Pague seu PIX e garanta sua vaga',
-    subtitulo: `Valor: ${valorFmt} · Rodada ${nomeRodada}`,
+    subtitulo: `Valor: ${valorFmt} - Rodada ${nomeRodada}`,
     conteudo,
     ctaTexto: 'ABRIR MEU DASHBOARD',
     ctaUrl: `${frontendUrl}/dashboard`
@@ -262,14 +275,15 @@ async function enviarEmailQrCodePix (
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: `💳 Pague ${valorFmt} e garanta sua vaga — ${nomeRodada}`,
+    subject: `Pague ${valorFmt} e garanta sua vaga - ${nomeRodada}`,
     html
   })
-  console.log(`📧 [email] QR Code PIX enviado para ${usuario.email}`)
+  console.log(`[email] QR Code PIX enviado para ${usuario.email}`)
+  return true
 }
 
 // ===========================================
-// EMAIL 3: Lembrete de pagamento (cobrança)
+// EMAIL 3: Lembrete de pagamento
 // ===========================================
 async function enviarEmailCobranca (usuario, rodada, valor, tipo = 'cobranca') {
   const frontendUrl = getFrontendUrl()
@@ -280,30 +294,30 @@ async function enviarEmailCobranca (usuario, rodada, valor, tipo = 'cobranca') {
   const ehLembrete = tipo === 'lembrete'
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
     <p style="margin:0 0 12px 0;">
-      ${ehLembrete ? '⏰ Passando para lembrar: ' : '⚠️ Atenção: '}
-      <strong>seu pagamento está pendente</strong> na ${nomeRodada}.
+      ${ehLembrete ? 'Passando para lembrar: ' : 'Atencao: '}
+      <strong>seu pagamento esta pendente</strong> na ${nomeRodada}.
     </p>
 
     ${boxDestaque(
-      `💰 <strong>Valor:</strong> ${valorFmt}<br>
-       🎯 <strong>Rodada:</strong> ${nomeRodada}`,
+      `<strong>Valor:</strong> ${valorFmt}<br>
+       <strong>Rodada:</strong> ${nomeRodada}`,
       { cor: '#fef3c7', borda: '#f59e0b', textoCor: '#78350f' }
     )}
 
-    <p style="margin:12px 0;">Quando todos os 8 VERMELHOS pagarem, a rodada avança e o <strong>VERDE</strong> da vez recebe <strong>${PREMIO_VERDE_TEXTO}</strong>. Faltando só você, a roda para!</p>
+    <p style="margin:12px 0;">Quando todos os 8 VERMELHOS pagarem, a rodada avanca e o <strong>VERDE</strong> da vez recebe <strong>${PREMIO_VERDE_TEXTO}</strong>. Faltando so voce, a roda para!</p>
 
-    <p style="margin:12px 0 0 0;font-size:14px;color:#4b5563;">👉 Acesse o dashboard para gerar um novo QR Code PIX e efetuar o pagamento.</p>
+    <p style="margin:12px 0 0 0;font-size:14px;color:#4b5563;">Acesse o dashboard para gerar um novo QR Code PIX e efetuar o pagamento.</p>
   `
 
   const html = templateBase({
     cor: ehLembrete ? '#f59e0b' : '#ef4444',
-    emoji: ehLembrete ? '⏰' : '⚠️',
+    emoji: '',
     titulo: ehLembrete
-      ? 'Lembrete: falta você pagar!'
-      : 'Não deixe sua vaga expirar',
-    subtitulo: `${nomeRodada} · ${valorFmt}`,
+      ? 'Lembrete: falta voce pagar!'
+      : 'Nao deixe sua vaga expirar',
+    subtitulo: `${nomeRodada} - ${valorFmt}`,
     conteudo,
     ctaTexto: 'PAGAR AGORA',
     ctaUrl: `${frontendUrl}/dashboard`,
@@ -314,15 +328,15 @@ async function enviarEmailCobranca (usuario, rodada, valor, tipo = 'cobranca') {
     from: FROM(),
     to: usuario.email,
     subject: ehLembrete
-      ? `⏰ Lembrete: pague ${valorFmt} para não perder sua vaga`
-      : `⚠️ ${valorFmt} pendente — não deixe sua vaga expirar`,
+      ? `Lembrete: pague ${valorFmt} para nao perder sua vaga`
+      : `${valorFmt} pendente - nao deixe sua vaga expirar`,
     html
   })
-  console.log(`📧 [email] Cobrança (${tipo}) enviada para ${usuario.email}`)
+  console.log(`[email] Cobranca (${tipo}) enviada para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 4: Prêmio recebido (verde ganhou)
+// EMAIL 4: Premio recebido
 // ===========================================
 async function enviarEmailPremio (usuario, rodada, valor) {
   const frontendUrl = getFrontendUrl()
@@ -331,43 +345,42 @@ async function enviarEmailPremio (usuario, rodada, valor) {
   const valorFmt = formatarMoeda(valor || PREMIO_VERDE)
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">🎉 <strong>Parabéns, ${primeiroNome}!</strong></p>
-    <p style="margin:0 0 12px 0;">Você foi o <strong>VERDE</strong> da ${nomeRodada} e todos os pagamentos foram confirmados. Você acabou de ganhar:</p>
+    <p style="margin:0 0 12px 0;"><strong>Parabens, ${primeiroNome}!</strong></p>
+    <p style="margin:0 0 12px 0;">Voce foi o <strong>VERDE</strong> da ${nomeRodada} e todos os pagamentos foram confirmados. Voce acabou de ganhar:</p>
 
     <div style="text-align:center;background:linear-gradient(135deg,#10B981,#059669);border-radius:12px;padding:24px;margin:20px 0;">
-      <p style="margin:0;color:#ffffff;font-size:14px;opacity:0.9;">Seu prêmio</p>
+      <p style="margin:0;color:#ffffff;font-size:14px;opacity:0.9;">Seu premio</p>
       <p style="margin:8px 0 0 0;color:#ffffff;font-size:36px;font-weight:800;letter-spacing:-1px;">${valorFmt}</p>
     </div>
 
-    <p style="margin:12px 0;">💰 O valor já está disponível no seu saldo de prêmios. Você pode <strong>sacar a qualquer momento</strong> para sua chave PIX.</p>
+    <p style="margin:12px 0;">O valor ja esta disponivel no seu saldo de premios. Voce pode <strong>sacar a qualquer momento</strong> para sua chave PIX.</p>
 
     ${boxDestaque(
-      `🎁 <strong>Dica:</strong> você pode usar parte do prêmio para jogar novamente e continuar na rodada, ou sacar tudo de uma vez. Você decide!`,
-      { cor: '#ecfdf5', borda: '#10B981', textoCor: '#065f46' }
+      `<strong>Dica:</strong> voce pode usar parte do premio para jogar novamente e continuar na rodada, ou sacar tudo de uma vez. Voce decide!`
     )}
   `
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '🏆',
-    titulo: 'Você ganhou o prêmio!',
-    subtitulo: `Rodada ${nomeRodada} concluída`,
+    emoji: '',
+    titulo: 'Voce ganhou o premio!',
+    subtitulo: `Rodada ${nomeRodada} concluida`,
     conteudo,
-    ctaTexto: 'SACAR MEU PRÊMIO',
+    ctaTexto: 'SACAR MEU PREMIO',
     ctaUrl: `${frontendUrl}/dashboard`
   })
 
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: `🏆 Você ganhou ${valorFmt} no Giro Premiado!`,
+    subject: `Voce ganhou ${valorFmt} no Giro Premiado!`,
     html
   })
-  console.log(`📧 [email] Prêmio enviado para ${usuario.email}`)
+  console.log(`[email] Premio enviado para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 5: Rodada avançou (nova cor atribuída)
+// EMAIL 5: Rodada avancou
 // ===========================================
 async function enviarEmailRodadaAvancada (
   usuario,
@@ -381,49 +394,41 @@ async function enviarEmailRodadaAvancada (
 
   const descricoes = {
     amarelo: {
-      emoji: '🟡',
-      titulo: 'Você está na fila',
+      titulo: 'Voce esta na fila',
       texto: 'Aguarde uma vaga para entrar como VERMELHO.'
     },
     vermelho: {
-      emoji: '🔴',
-      titulo: 'Você é VERMELHO!',
+      titulo: 'Voce e VERMELHO!',
       texto: `Efetue o pagamento de ${VALOR_VERMELHO_TEXTO} para fazer a roda girar.`
     },
     azul: {
-      emoji: '🔵',
-      titulo: 'Você subiu! Agora é AZUL',
-      texto: 'Sua missão: trazer 2 amigos para a rodada.'
+      titulo: 'Voce subiu! Agora e AZUL',
+      texto: 'Sua missao: trazer 2 amigos para a rodada.'
     },
     preto: {
-      emoji: '⚫',
-      titulo: 'Você é PRETO',
-      texto: 'Continue dando suporte à rodada — logo você será VERDE!'
+      titulo: 'Voce e PRETO',
+      texto: 'Continue dando suporte a rodada - logo voce sera VERDE!'
     },
     verde: {
-      emoji: '🟢',
-      titulo: '🎊 Você é o VERDE da vez!',
+      titulo: 'Voce e o VERDE da vez!',
       texto: `Aguarde os 8 VERMELHOS pagarem para receber ${PREMIO_VERDE_TEXTO}.`
     },
     concluido: {
-      emoji: '🏆',
-      titulo: 'Você ganhou o prêmio!',
-      texto: `Seu saldo de ${PREMIO_VERDE_TEXTO} já está disponível para saque.`
+      titulo: 'Voce ganhou o premio!',
+      texto: `Seu saldo de ${PREMIO_VERDE_TEXTO} ja esta disponivel para saque.`
     }
   }
 
   const info = descricoes[corNova] || {
-    emoji: '🎯',
     titulo: 'Sua cor mudou',
-    texto: `Você agora é ${corNova?.toUpperCase()}.`
+    texto: `Voce agora e ${corNova?.toUpperCase()}.`
   }
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">🎯 A ${nomeRodada} avançou e você tem uma nova posição:</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">A ${nomeRodada} avancou e voce tem uma nova posicao:</p>
 
     <div style="text-align:center;background:#f9fafb;border-radius:12px;padding:24px;margin:16px 0;">
-      <div style="font-size:40px;line-height:1;">${info.emoji}</div>
       <p style="margin:8px 0 4px 0;font-size:18px;font-weight:800;color:#111827;">${
         info.titulo
       }</p>
@@ -435,7 +440,7 @@ async function enviarEmailRodadaAvancada (
         ? listaPassos([
             'Abra o dashboard e gere seu link de convite',
             'Compartilhe com 2 amigos',
-            'Quando eles se cadastrarem, você sobe para PRETO'
+            'Quando eles se cadastrarem, voce sobe para PRETO'
           ])
         : ''
     }
@@ -443,7 +448,7 @@ async function enviarEmailRodadaAvancada (
     ${
       corNova === 'verde'
         ? boxDestaque(
-            `Você é o sortudo desta rodada! Assim que os 8 VERMELHOS pagarem, você recebe ${PREMIO_VERDE_TEXTO} automaticamente.`
+            `Voce e o sortudo desta rodada! Assim que os 8 VERMELHOS pagarem, voce recebe ${PREMIO_VERDE_TEXTO} automaticamente.`
           )
         : ''
     }
@@ -458,40 +463,40 @@ async function enviarEmailRodadaAvancada (
         : corNova === 'concluido'
         ? '#10B981'
         : '#6b7280',
-    emoji: info.emoji,
+    emoji: '',
     titulo: info.titulo,
-    subtitulo: `${nomeRodada} avançou`,
+    subtitulo: `${nomeRodada} avancou`,
     conteudo,
-    ctaTexto: 'VER MINHA POSIÇÃO',
+    ctaTexto: 'VER MINHA POSICAO',
     ctaUrl: `${frontendUrl}/dashboard`
   })
 
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: `${info.emoji} ${info.titulo} — ${nomeRodada}`,
+    subject: `${info.titulo} - ${nomeRodada}`,
     html
   })
-  console.log(`📧 [email] Rodada avançada enviado para ${usuario.email}`)
+  console.log(`[email] Rodada avancada enviado para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 6: Convite (motivação para trazer amigos)
+// EMAIL 6: Convite
 // ===========================================
 async function enviarEmailConvite (usuario, linkConvite) {
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
   const frontendUrl = getFrontendUrl()
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">🚀 Quanto mais pessoas você convidar, mais rápido a roda gira — e mais perto você fica do prêmio!</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">Quanto mais pessoas voce convidar, mais rapido a roda gira - e mais perto voce fica do premio!</p>
 
     <div style="background:#f3f4f6;border-radius:8px;padding:14px;word-break:break-all;font-family:monospace;font-size:12px;color:#4b5563;margin:16px 0;">
       ${linkConvite}
     </div>
 
     ${boxDestaque(
-      `🎁 <strong>Bônus:</strong> seus convidados entram automaticamente na sua rodada como VERMELHOS, e você avança de cor mais rápido!`
+      `<strong>Bonus:</strong> seus convidados entram automaticamente na sua rodada como VERMELHOS, e voce avanca de cor mais rapido!`
     )}
 
     <p style="margin:12px 0;">Compartilhe agora mesmo pelo WhatsApp, Email ou copie o link e envie para quem quiser:</p>
@@ -499,9 +504,9 @@ async function enviarEmailConvite (usuario, linkConvite) {
 
   const html = templateBase({
     cor: '#8b5cf6',
-    emoji: '🚀',
-    titulo: 'Convide amigos e ganhe mais rápido',
-    subtitulo: 'Cada convite aproxima você do prêmio',
+    emoji: '',
+    titulo: 'Convide amigos e ganhe mais rapido',
+    subtitulo: 'Cada convite aproxima voce do premio',
     conteudo,
     ctaTexto: 'COMPARTILHAR MEU LINK',
     ctaUrl: `${frontendUrl}/dashboard`,
@@ -511,14 +516,14 @@ async function enviarEmailConvite (usuario, linkConvite) {
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: '🚀 Convide amigos e acelere sua rodada!',
+    subject: 'Convide amigos e acelere sua rodada!',
     html
   })
-  console.log(`📧 [email] Convite enviado para ${usuario.email}`)
+  console.log(`[email] Convite enviado para ${usuario.email}`)
 }
 
 // ===========================================
-// EXPORTS PÚBLICOS
+// EXPORTS
 // ===========================================
 exports.enviarEmailBoasVindas = enviarEmailBoasVindas
 exports.enviarEmailQrCodePix = enviarEmailQrCodePix
@@ -535,17 +540,17 @@ exports.notificarPremioVerde = async (
   try {
     const usuario = await User.findById(usuarioId)
     const rodada = await Rodada.findById(rodadaId)
-    if (!usuario || !rodada) throw new Error('Usuário ou rodada não encontrado')
+    if (!usuario || !rodada) throw new Error('Usuario ou rodada nao encontrado')
     await enviarEmailPremio(usuario, rodada, valor)
     return true
   } catch (error) {
-    console.error('❌ Erro ao notificar verde sobre prêmio:', error)
+    console.error('Erro ao notificar verde sobre premio:', error)
     return false
   }
 }
 
 // ===========================================
-// COOLDOWN (24h por usuário + rodada)
+// COOLDOWN
 // ===========================================
 const emailCooldownCache = new Map()
 
@@ -563,14 +568,14 @@ function registrarEnvio (usuarioId, rodadaId) {
 }
 
 // ===========================================
-// ENDPOINTS REST (cobranças/lembretes manuais)
+// ENDPOINTS REST
 // ===========================================
 exports.cobrarUsuario = async (req, res) => {
   try {
     const { usuarioId } = req.params
     const { rodadaId, valor } = req.body
     if (!rodadaId)
-      return res.status(400).json({ error: 'rodadaId obrigatório' })
+      return res.status(400).json({ error: 'rodadaId obrigatorio' })
 
     if (!podeEnviarEmail(usuarioId, rodadaId)) {
       const ultimoEnvio = emailCooldownCache.get(`${usuarioId}_${rodadaId}`)
@@ -583,7 +588,7 @@ exports.cobrarUsuario = async (req, res) => {
     const usuario = await User.findById(usuarioId)
     const rodada = await Rodada.findById(rodadaId)
     if (!usuario || !rodada)
-      return res.status(404).json({ error: 'Usuário ou rodada não encontrado' })
+      return res.status(404).json({ error: 'Usuario ou rodada nao encontrado' })
 
     await enviarEmailCobranca(
       usuario,
@@ -597,7 +602,7 @@ exports.cobrarUsuario = async (req, res) => {
       message: `Lembrete enviado para ${usuario.nome}`
     })
   } catch (error) {
-    console.error('Erro ao cobrar usuário:', error)
+    console.error('Erro ao cobrar usuario:', error)
     res.status(500).json({ error: error.message })
   }
 }
@@ -607,7 +612,7 @@ exports.enviarLembrete = async (req, res) => {
     const { usuarioId } = req.params
     const { rodadaId, valor } = req.body
     if (!rodadaId)
-      return res.status(400).json({ error: 'rodadaId obrigatório' })
+      return res.status(400).json({ error: 'rodadaId obrigatorio' })
 
     if (!podeEnviarEmail(usuarioId, rodadaId)) {
       const ultimoEnvio = emailCooldownCache.get(`${usuarioId}_${rodadaId}`)
@@ -620,7 +625,7 @@ exports.enviarLembrete = async (req, res) => {
     const usuario = await User.findById(usuarioId)
     const rodada = await Rodada.findById(rodadaId)
     if (!usuario || !rodada)
-      return res.status(404).json({ error: 'Usuário ou rodada não encontrado' })
+      return res.status(404).json({ error: 'Usuario ou rodada nao encontrado' })
 
     await enviarEmailCobranca(
       usuario,
@@ -643,7 +648,7 @@ exports.cobrarTodosPendentes = async (req, res) => {
   try {
     const { rodadaId } = req.params
     const rodada = await Rodada.findById(rodadaId)
-    if (!rodada) return res.status(404).json({ error: 'Rodada não encontrada' })
+    if (!rodada) return res.status(404).json({ error: 'Rodada nao encontrada' })
 
     const vermelhosPendentes = rodada.participantes.filter(
       p => p.cor === 'vermelho' && !p.depositoConfirmado
@@ -675,7 +680,7 @@ exports.cobrarTodosPendentes = async (req, res) => {
 
     res.json({
       success: true,
-      message: `Lembretes enviados para ${resultados.length} usuário(s)`,
+      message: `Lembretes enviados para ${resultados.length} usuario(s)`,
       data: { enviados: resultados, erros }
     })
   } catch (error) {
@@ -705,7 +710,7 @@ exports.verificarCooldown = async (req, res) => {
 }
 
 // ===========================================
-// NOTIFICAÇÕES ADMIN
+// NOTIFICACOES ADMIN
 // ===========================================
 exports.notificarAdminNovaSolicitacao = async (usuario, rodada, valor) => {
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@giropremiados.com.br'
@@ -713,12 +718,12 @@ exports.notificarAdminNovaSolicitacao = async (usuario, rodada, valor) => {
   const valorFmt = formatarMoeda(valor)
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Nova solicitação de saque recebida.</p>
+    <p style="margin:0 0 12px 0;">Nova solicitacao de saque recebida.</p>
     ${boxDestaque(
-      `👤 <strong>Usuário:</strong> ${usuario.nome} (${usuario.email})<br>
-       💰 <strong>Valor:</strong> ${valorFmt}<br>
-       🎯 <strong>Rodada:</strong> ${rodada.nome}<br>
-       🔑 <strong>Chave PIX:</strong> ${usuario.chavePix || 'não informada'} (${
+      `<strong>Usuario:</strong> ${usuario.nome} (${usuario.email})<br>
+       <strong>Valor:</strong> ${valorFmt}<br>
+       <strong>Rodada:</strong> ${rodada.nome}<br>
+       <strong>Chave PIX:</strong> ${usuario.chavePix || 'nao informada'} (${
         usuario.tipoChavePix || '-'
       })`
     )}
@@ -727,9 +732,9 @@ exports.notificarAdminNovaSolicitacao = async (usuario, rodada, valor) => {
 
   const html = templateBase({
     cor: '#3b82f6',
-    emoji: '💰',
-    titulo: 'Nova solicitação de saque',
-    subtitulo: `${valorFmt} — ${usuario.nome}`,
+    emoji: '',
+    titulo: 'Nova solicitacao de saque',
+    subtitulo: `${valorFmt} - ${usuario.nome}`,
     conteudo,
     ctaTexto: 'ABRIR PAINEL ADMIN',
     ctaUrl: `${frontendUrl}/admin`,
@@ -740,17 +745,17 @@ exports.notificarAdminNovaSolicitacao = async (usuario, rodada, valor) => {
     await transporter.sendMail({
       from: FROM(),
       to: adminEmail,
-      subject: `💰 Nova solicitação de saque — ${valorFmt} (${usuario.nome})`,
+      subject: `Nova solicitacao de saque - ${valorFmt} (${usuario.nome})`,
       html
     })
-    console.log(`📧 [email] Admin notificado sobre saque de ${usuario.nome}`)
+    console.log(`[email] Admin notificado sobre saque de ${usuario.nome}`)
   } catch (err) {
     console.error('Erro ao notificar admin:', err.message)
   }
 }
 
 // ===========================================
-// NOTIFICAÇÕES DE SAQUE
+// NOTIFICACOES DE SAQUE
 // ===========================================
 exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
   const frontendUrl = getFrontendUrl()
@@ -758,20 +763,20 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">🎉 Boa notícia! Seu saque foi <strong>aprovado</strong> e o PIX está a caminho.</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">Boa noticia! Seu saque foi <strong>aprovado</strong> e o PIX esta a caminho.</p>
 
     <div style="text-align:center;background:linear-gradient(135deg,#10B981,#059669);border-radius:12px;padding:24px;margin:20px 0;">
       <p style="margin:0;color:#ffffff;font-size:14px;opacity:0.9;">Valor enviado</p>
       <p style="margin:8px 0 0 0;color:#ffffff;font-size:32px;font-weight:800;">${valorFmt}</p>
     </div>
 
-    <p style="margin:12px 0;">O valor chegará na sua chave PIX <strong>${
+    <p style="margin:12px 0;">O valor chegara na sua chave PIX <strong>${
       solicitacao.chavePix
     }</strong> em instantes.</p>
 
     ${boxDestaque(
-      `🎁 <strong>E aí, vamos de novo?</strong> Você já tem saldo de prêmio — clique em "Jogar Novamente" no dashboard para continuar na roda e concorrer a mais ${PREMIO_VERDE_TEXTO}!`
+      `<strong>E ai, vamos de novo?</strong> Voce ja tem saldo de premio - clique em "Jogar Novamente" no dashboard para continuar na roda e concorrer a mais ${PREMIO_VERDE_TEXTO}!`
     )}
   `
 
@@ -792,10 +797,10 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
       subject: `Saque de ${valorFmt} aprovado e enviado!`,
       html
     })
-    console.log(`📧 [email] Saque aprovado enviado para ${usuario.email}`)
+    console.log(`[email] Saque aprovado enviado para ${usuario.email}`)
   } catch (err) {
     console.error(
-      'Erro ao notificar usuário sobre saque aprovado:',
+      'Erro ao notificar usuario sobre saque aprovado:',
       err.message
     )
   }
@@ -807,23 +812,23 @@ exports.notificarSaqueRecusado = async (usuario, solicitacao, motivo) => {
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">Sua solicitação de saque no valor de <strong>${valorFmt}</strong> foi recusada pelo administrador.</p>
+    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 12px 0;">Sua solicitacao de saque no valor de <strong>${valorFmt}</strong> foi recusada pelo administrador.</p>
 
-    ${boxDestaque(`<strong>Motivo:</strong> ${motivo || 'Não informado'}`, {
+    ${boxDestaque(`<strong>Motivo:</strong> ${motivo || 'Nao informado'}`, {
       cor: '#fee2e2',
       borda: '#ef4444',
       textoCor: '#991b1b'
     })}
 
-    <p style="margin:12px 0;">O valor permanece no seu saldo de prêmios. Você pode solicitar um novo saque a qualquer momento.</p>
+    <p style="margin:12px 0;">O valor permanece no seu saldo de premios. Voce pode solicitar um novo saque a qualquer momento.</p>
   `
 
   const html = templateBase({
     cor: '#ef4444',
-    emoji: '❌',
+    emoji: '',
     titulo: 'Seu saque foi recusado',
-    subtitulo: `${valorFmt} — ${solicitacao.rodada?.nome || 'Rodada'}`,
+    subtitulo: `${valorFmt} - ${solicitacao.rodada?.nome || 'Rodada'}`,
     conteudo,
     ctaTexto: 'VOLTAR AO DASHBOARD',
     ctaUrl: `${frontendUrl}/dashboard`,
@@ -834,10 +839,10 @@ exports.notificarSaqueRecusado = async (usuario, solicitacao, motivo) => {
     await transporter.sendMail({
       from: FROM(),
       to: usuario.email,
-      subject: `❌ Saque de ${valorFmt} recusado — veja o motivo`,
+      subject: `Saque de ${valorFmt} recusado - veja o motivo`,
       html
     })
-    console.log(`📧 [email] Saque recusado enviado para ${usuario.email}`)
+    console.log(`[email] Saque recusado enviado para ${usuario.email}`)
   } catch (err) {
     console.error('Erro ao notificar recusa de saque:', err.message)
   }

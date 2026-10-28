@@ -15,10 +15,7 @@ const activityService = require('./activityService')
 const notificationService = require('./notificationService')
 const badgeService = require('./badgeService')
 const emailController = require('../controllers/emailController')
-
-// ✅ NOVO: service centralizado de comissão
 const comissaoService = require('./comissaoService')
-
 const pagamentosProcessadosService = new Map()
 const processandoRodadas = new Map()
 let alocandoFila = false
@@ -418,13 +415,27 @@ class RodadaService {
 
       let transacaoData = null
       if (transacao) {
-        await transacao.populate('metadata')
-        transacaoData = {
-          id: transacao._id,
-          qrCode: transacao.metadata?.qrCode,
-          qrCodeImage: transacao.metadata?.qrCodeImage,
-          expiraEm: transacao.metadata?.expiraEm,
-          valor: transacao.valor
+        try {
+          const transacaoAtualizada = await Transacao.findById(
+            transacao._id
+          ).lean()
+          if (transacaoAtualizada) {
+            transacaoData = {
+              id: transacaoAtualizada._id,
+              qrCode: transacaoAtualizada.metadata?.qrCode || null,
+              qrCodeImage: transacaoAtualizada.metadata?.qrCodeImage || null,
+              expiraEm: transacaoAtualizada.metadata?.expiraEm || null,
+              valor: transacaoAtualizada.valor
+            }
+            console.log(
+              `[VERMELHO] TransacaoData recarregada: qrCode=${!!transacaoData.qrCode}, qrCodeImage=${!!transacaoData.qrCodeImage}`
+            )
+          }
+        } catch (err) {
+          console.error(
+            `[VERMELHO] Erro ao recarregar transacao ${transacao._id}:`,
+            err.message
+          )
         }
       }
 

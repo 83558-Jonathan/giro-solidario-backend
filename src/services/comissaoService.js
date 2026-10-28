@@ -116,7 +116,7 @@ async function processarComissao ({
     await User.updateOne({ _id: indicador._id }, { $inc: inc })
 
     console.log(
-      `[COMISSAO][${source}] ✅ R$${COMISSAO_INDICACAO} (${tipo}) creditada para ${
+      `[COMISSAO][${source}]  R$${COMISSAO_INDICACAO} (${tipo}) creditada para ${
         indicador.nome
       } (indicou ${indicado?.nome || '?'})`
     )
