@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema({
   totalComissao: { type: Number, default: 0 },
   totalIndicacoesComissionadas: { type: Number, default: 0 },
 
-  : influenciador (comissão recorrente)
+  // Influenciador (comissao recorrente)
   isInfluenciador: { type: Boolean, default: false },
   dataInfluenciador: { type: Date, default: null },
 
