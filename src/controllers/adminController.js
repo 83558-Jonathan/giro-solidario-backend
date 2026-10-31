@@ -4,10 +4,11 @@ const Transacao = require('../models/Transacao')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const Comissao = require('../models/Comissao')
 const { enviarPixSaque } = require('./pixController')
+const { PREMIO_VERDE } = require('../config/constantes')
 const mongoose = require('mongoose')
 
 // ===========================================
-// ESTATÍSTICAS GERAIS
+// ESTATISTICAS GERAIS (enriquecido)
 // ===========================================
 exports.getEstatisticas = async (req, res) => {
   try {
@@ -44,7 +45,6 @@ exports.getEstatisticas = async (req, res) => {
       status: 'confirmado'
     })
 
-    // Métricas extras
     const usuariosNaFila = await User.countDocuments({
       aguardandoVermelho: true
     })
@@ -56,6 +56,40 @@ exports.getEstatisticas = async (req, res) => {
       { $group: { _id: null, total: { $sum: '$totalComissao' } } }
     ])
 
+    // NOVO: breakdown de comissões por tipo
+    const comissoesPorTipo = await Comissao.aggregate([
+      {
+        $group: {
+          _id: '$tipo',
+          total: { $sum: '$valor' },
+          count: { $sum: 1 }
+        }
+      }
+    ])
+    const comissoesUnicas =
+      comissoesPorTipo.find(c => c._id === 'unica')?.total || 0
+    const comissoesRecorrentes =
+      comissoesPorTipo.find(c => c._id === 'recorrente')?.total || 0
+
+    // NOVO: volume total transacionado
+    const totalTransacionadoAgg = await Transacao.aggregate([
+      { $match: { status: 'confirmado' } },
+      { $group: { _id: null, total: { $sum: '$valor' } } }
+    ])
+    const totalTransacionado = totalTransacionadoAgg[0]?.total || 0
+
+    // AUDITORIA: pendencias criticas
+    const quinzeMinAtras = new Date(Date.now() - 15 * 60 * 1000)
+    const umDiaAtras = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const transacoesPendentesAntigas = await Transacao.countDocuments({
+      status: 'pendente',
+      createdAt: { $lt: quinzeMinAtras }
+    })
+    const saquesPendentesAntigos = await SolicitacaoSaque.countDocuments({
+      status: 'pendente',
+      dataSolicitacao: { $lt: umDiaAtras }
+    })
+
     res.json({
       success: true,
       data: {
@@ -63,14 +97,28 @@ exports.getEstatisticas = async (req, res) => {
         usuariosNaFila,
         saldoTotalUsuarios: saldoTotal,
         totalComissoesPagas: totalComissoesPagas[0]?.total || 0,
+        totalTransacionado,
+        comissoes: {
+          unicas: comissoesUnicas,
+          recorrentes: comissoesRecorrentes,
+          total: comissoesUnicas + comissoesRecorrentes
+        },
         rodadas: {
           total: rodadasAtivas + rodadasAguardando + rodadasConcluidas,
           ativas: rodadasAtivas,
           aguardando: rodadasAguardando,
           concluidas: rodadasConcluidas
         },
-        saques: { pendentes: saquesPendentes, totalSolicitado, totalPago },
-        transacoes: { confirmadas: transacoesConfirmadas }
+        saques: {
+          pendentes: saquesPendentes,
+          pendentesAntigos: saquesPendentesAntigos,
+          totalSolicitado,
+          totalPago
+        },
+        transacoes: {
+          confirmadas: transacoesConfirmadas,
+          pendentesAntigas: transacoesPendentesAntigas
+        }
       }
     })
   } catch (error) {
@@ -80,7 +128,7 @@ exports.getEstatisticas = async (req, res) => {
 }
 
 // ===========================================
-// LISTA COMPLETA DE USUÁRIOS (com estatísticas + comissões)
+// LISTA COMPLETA DE USUARIOS (com estatisticas + comissoes)
 // ===========================================
 exports.getUsuariosCompletos = async (req, res) => {
   try {
@@ -91,14 +139,12 @@ exports.getUsuariosCompletos = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean()
 
-    // OTIMIZAÇÃO: busca TODAS as rodadas UMA vez
     const todasRodadas = await Rodada.find({
       'participantes.usuario': { $in: usuarios.map(u => u._id) }
     })
       .select('nome numero status participantes')
       .lean()
 
-    // OTIMIZAÇÃO: agregação única para transações como pagador
     const apostasPorUsuario = await Transacao.aggregate([
       {
         $match: {
@@ -112,7 +158,6 @@ exports.getUsuariosCompletos = async (req, res) => {
       apostasPorUsuario.map(a => [a._id.toString(), a.total])
     )
 
-    // OTIMIZAÇÃO: agregação única para transações como recebedor
     const recebidosPorUsuario = await Transacao.aggregate([
       {
         $match: {
@@ -126,7 +171,6 @@ exports.getUsuariosCompletos = async (req, res) => {
       recebidosPorUsuario.map(r => [r._id.toString(), r.total])
     )
 
-    // NOVO: contagem de comissões por usuário (batch)
     const comissoesPorUsuario = await Comissao.aggregate([
       { $match: { indicador: { $in: usuarios.map(u => u._id) } } },
       {
@@ -134,9 +178,7 @@ exports.getUsuariosCompletos = async (req, res) => {
           _id: '$indicador',
           total: { $sum: 1 },
           valor: { $sum: '$valor' },
-          unicas: {
-            $sum: { $cond: [{ $eq: ['$tipo', 'unica'] }, 1, 0] }
-          },
+          unicas: { $sum: { $cond: [{ $eq: ['$tipo', 'unica'] }, 1, 0] } },
           recorrentes: {
             $sum: { $cond: [{ $eq: ['$tipo', 'recorrente'] }, 1, 0] }
           }
@@ -157,18 +199,15 @@ exports.getUsuariosCompletos = async (req, res) => {
 
     const usuariosCompletos = usuarios.map(u => {
       const uid = u._id.toString()
-
       const rodadasDoUsuario = todasRodadas.filter(r =>
         r.participantes.some(p => p.usuario.toString() === uid)
       )
-
       const rodadasJogadas = rodadasDoUsuario.length
       const rodadasVencidas = rodadasDoUsuario.filter(r =>
         r.participantes.some(
           p => p.usuario.toString() === uid && p.cor === 'concluido'
         )
       ).length
-
       const rodadaAtiva = rodadasDoUsuario.find(r =>
         ['aguardando', 'em_andamento'].includes(r.status)
       )
@@ -192,6 +231,7 @@ exports.getUsuariosCompletos = async (req, res) => {
           },
           rodadaAtiva: rodadaAtiva
             ? {
+                id: rodadaAtiva._id,
                 nome: rodadaAtiva.nome,
                 numero: rodadaAtiva.numero,
                 status: rodadaAtiva.status,
@@ -209,37 +249,39 @@ exports.getUsuariosCompletos = async (req, res) => {
       data: usuariosCompletos
     })
   } catch (error) {
-    console.error('Erro ao buscar usuários completos:', error)
+    console.error('Erro ao buscar usuarios completos:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 }
 
 // ===========================================
-// DETALHE DE UM USUÁRIO (com todas rodadas + indicações)
+// DETALHE DE UM USUARIO (auditoria completa)
 // ===========================================
 exports.getUsuarioDetalhe = async (req, res) => {
   try {
     const { id } = req.params
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
+      return res.status(400).json({ success: false, error: 'ID invalido' })
     }
 
     const usuario = await User.findById(id)
       .select('-senha -resetPasswordToken -resetPasswordExpires')
       .populate('indicadoPor', 'nome email codigoConvite')
-      .populate('meusIndicados', 'nome email createdAt saldoPremio')
+      .populate(
+        'meusIndicados',
+        'nome email createdAt saldoPremio totalGanho isInfluenciador'
+      )
       .lean()
 
     if (!usuario) {
       return res
         .status(404)
-        .json({ success: false, error: 'Usuário não encontrado' })
+        .json({ success: false, error: 'Usuario nao encontrado' })
     }
 
-    // Todas as rodadas que participou
     const rodadas = await Rodada.find({ 'participantes.usuario': id })
       .select(
-        'nome numero status participantes verde pretos azuis vermelhos createdAt dataInicio dataFim'
+        'nome numero status participantes verde pretos azuis vermelhos createdAt dataInicio dataFim premioVerdePago'
       )
       .sort({ numero: -1 })
       .lean()
@@ -254,34 +296,51 @@ exports.getUsuarioDetalhe = async (req, res) => {
         cor: p?.cor,
         depositoConfirmado: p?.depositoConfirmado,
         dataEntrada: p?.dataEntrada,
+        dataDeposito: p?.dataDeposito,
+        transacaoId: p?.transacaoId,
         indicadoPor: p?.indicadoPor,
+        comissaoPaga: p?.comissaoPaga,
         createdAt: r.createdAt,
-        dataFim: r.dataFim
+        dataFim: r.dataFim,
+        premioVerdePago: r.premioVerdePago
       }
     })
 
-    // Todas as transações
     const transacoes = await Transacao.find({
       $or: [{ pagador: id }, { recebedor: id }]
     })
-      .populate('pagador', 'nome')
-      .populate('recebedor', 'nome')
+      .populate('pagador', 'nome email')
+      .populate('recebedor', 'nome email')
       .populate('rodada', 'nome numero')
       .sort({ createdAt: -1 })
       .lean()
 
-    // Todos os saques
     const saques = await SolicitacaoSaque.find({ usuario: id })
       .populate('rodada', 'nome numero')
       .sort({ dataSolicitacao: -1 })
       .lean()
 
-    // NOVO: comissões recebidas por este usuário
     const comissoes = await Comissao.find({ indicador: id })
       .populate('indicado', 'nome email')
       .populate('rodada', 'nome numero')
       .sort({ createdAt: -1 })
       .lean()
+
+    // Resumo financeiro
+    const saldoPremio = Number(usuario.saldoPremio) || 0
+    const totalGanho = Number(usuario.totalGanho) || 0
+    const totalSacado = Number(usuario.totalSacado) || 0
+    const totalComissao = Number(usuario.totalComissao) || 0
+    const totalApostado = transacoes
+      .filter(
+        t => t.pagador?._id?.toString() === id && t.status === 'confirmado'
+      )
+      .reduce((a, t) => a + (t.valor || 0), 0)
+    const totalRecebido = transacoes
+      .filter(
+        t => t.recebedor?._id?.toString() === id && t.status === 'confirmado'
+      )
+      .reduce((a, t) => a + (t.valor || 0), 0)
 
     res.json({
       success: true,
@@ -290,11 +349,20 @@ exports.getUsuarioDetalhe = async (req, res) => {
         historicoRodadas,
         transacoes,
         saques,
-        comissoes
+        comissoes,
+        resumo: {
+          saldoPremio,
+          totalGanho,
+          totalSacado,
+          totalComissao,
+          totalApostado,
+          totalRecebido,
+          saldoConsolidado: saldoPremio + totalSacado
+        }
       }
     })
   } catch (error) {
-    console.error('Erro ao buscar detalhe do usuário:', error)
+    console.error('Erro ao buscar detalhe do usuario:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 }
@@ -358,7 +426,7 @@ exports.getSaquesPendentes = async (req, res) => {
 }
 
 // ===========================================
-// HISTÓRICO DE SAQUES
+// HISTORICO DE SAQUES
 // ===========================================
 exports.getTodosSaques = async (req, res) => {
   try {
@@ -436,35 +504,70 @@ exports.recusarSaque = async (req, res) => {
 }
 
 // ===========================================
-// DETALHE DE RODADA (com todos dados dos participantes)
+// DETALHE DE RODADA (AUDITORIA COMPLETA)
 // ===========================================
 exports.getRodadaDetalhes = async (req, res) => {
   try {
     const { id } = req.params
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
+      return res.status(400).json({ success: false, error: 'ID invalido' })
     }
 
     const rodada = await Rodada.findById(id)
       .populate(
         'participantes.usuario',
-        'nome email telefone cpf chavePix tipoChavePix saldoPremio totalGanho totalSacado meusIndicados indicadoPor'
+        'nome email telefone cpf chavePix tipoChavePix saldoPremio totalGanho totalSacado isInfluenciador totalIndicacoes meusIndicados indicadoPor createdAt'
       )
-      .populate('verde', 'nome email')
-      .populate('pretos', 'nome email')
-      .populate('azuis', 'nome email')
-      .populate('vermelhos', 'nome email')
+      .populate('verde', 'nome email cpf chavePix')
+      .populate('pretos', 'nome email cpf')
+      .populate('azuis', 'nome email cpf')
+      .populate('vermelhos', 'nome email cpf')
+      .populate('rodadasGeradas', 'nome numero status')
+      .populate('rodadaOrigem', 'nome numero status')
       .lean()
 
-    if (!rodada)
+    if (!rodada) {
       return res
         .status(404)
         .json({ success: false, error: 'Rodada nao encontrada' })
+    }
 
     const participantes = rodada.participantes || []
     const vermelhos = participantes.filter(p => p.cor === 'vermelho')
     const pagos = vermelhos.filter(v => v.depositoConfirmado).length
+    const pendentes = vermelhos.filter(v => !v.depositoConfirmado)
 
+    // TRANSACOES
+    const transacoes = await Transacao.find({ rodada: id })
+      .populate('pagador', 'nome email cpf chavePix')
+      .populate('recebedor', 'nome email cpf chavePix')
+      .sort({ createdAt: -1 })
+      .lean()
+
+    const confirmadas = transacoes.filter(t => t.status === 'confirmado')
+    const transacoesPendentes = transacoes.filter(t => t.status === 'pendente')
+    const totalArrecadado = confirmadas.reduce((a, t) => a + (t.valor || 0), 0)
+    const totalPendente = transacoesPendentes.reduce(
+      (a, t) => a + (t.valor || 0),
+      0
+    )
+
+    // COMISSOES
+    const comissoes = await Comissao.find({ rodada: id })
+      .populate('indicador', 'nome email isInfluenciador')
+      .populate('indicado', 'nome email')
+      .sort({ createdAt: -1 })
+      .lean()
+    const totalComissoes = comissoes.reduce((a, c) => a + (c.valor || 0), 0)
+
+    // GANHADOR
+    const ganhador = participantes.find(p => p.cor === 'concluido')
+
+    // PREMIO
+    const premioVerde = rodada.status === 'concluida' ? PREMIO_VERDE : 0
+    const margem = totalArrecadado - premioVerde - totalComissoes
+
+    // STATS DE CORES
     const stats = {
       totalParticipantes: participantes.length,
       verde: participantes.filter(p => p.cor === 'verde').length,
@@ -474,22 +577,53 @@ exports.getRodadaDetalhes = async (req, res) => {
       amarelo: participantes.filter(p => p.cor === 'amarelo').length,
       concluido: participantes.filter(p => p.cor === 'concluido').length,
       pagamentosConfirmados: pagos,
+      pagamentosPendentes: pendentes.length,
       percentualConcluido:
         vermelhos.length > 0 ? (pagos / vermelhos.length) * 100 : 0
     }
 
-    // Transações da rodada
-    const transacoes = await Transacao.find({ rodada: id })
-      .populate('pagador', 'nome email')
-      .populate('recebedor', 'nome email')
-      .lean()
+    // FINANCEIRO
+    const financeiro = {
+      totalArrecadado,
+      totalPendente,
+      totalComissoes,
+      premioVerde,
+      margem,
+      transacoesConfirmadas: confirmadas.length,
+      transacoesPendentes: transacoesPendentes.length
+    }
+
+    // PENDENTES COM DETALHES
+    const pendentesDetalhes = pendentes.map(p => ({
+      usuarioId: p.usuario?._id,
+      nome: p.usuario?.nome,
+      email: p.usuario?.email,
+      cpf: p.usuario?.cpf,
+      chavePix: p.usuario?.chavePix,
+      dataEntrada: p.dataEntrada,
+      transacaoId: p.transacaoId,
+      indicadoPor: p.indicadoPor
+    }))
 
     res.json({
       success: true,
       data: {
         ...rodada,
         stats,
-        transacoes
+        financeiro,
+        transacoes,
+        comissoes,
+        pendentesDetalhes,
+        ganhador: ganhador
+          ? {
+              usuarioId: ganhador.usuario?._id,
+              nome: ganhador.usuario?.nome,
+              email: ganhador.usuario?.email,
+              cpf: ganhador.usuario?.cpf,
+              chavePix: ganhador.usuario?.chavePix,
+              depositoConfirmado: ganhador.depositoConfirmado
+            }
+          : null
       }
     })
   } catch (error) {
@@ -499,7 +633,73 @@ exports.getRodadaDetalhes = async (req, res) => {
 }
 
 // ===========================================
-// APROVAR SAQUE (PIX automático)
+// NOVO: LISTAGEM DE RODADAS (admin, com stats inline)
+// ===========================================
+exports.getRodadasAdmin = async (req, res) => {
+  try {
+    const { status, limit = 100 } = req.query
+
+    const filter = {}
+    if (
+      status &&
+      ['aguardando', 'em_andamento', 'concluida'].includes(status)
+    ) {
+      filter.status = status
+    }
+
+    const rodadas = await Rodada.find(filter)
+      .select('-__v')
+      .sort({ numero: -1, createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean()
+
+    const rodadasComStats = rodadas.map(r => {
+      const participantes = r.participantes || []
+      const vermelhos = participantes.filter(p => p.cor === 'vermelho')
+      const pagos = vermelhos.filter(p => p.depositoConfirmado)
+
+      return {
+        _id: r._id,
+        nome: r.nome,
+        numero: r.numero,
+        status: r.status,
+        createdAt: r.createdAt,
+        dataInicio: r.dataInicio,
+        dataFim: r.dataFim,
+        premioVerdePago: r.premioVerdePago,
+        rodadaOrigem: r.rodadaOrigem,
+        rodadasGeradas: r.rodadasGeradas,
+        formacao: {
+          verde: participantes.filter(p => p.cor === 'verde').length,
+          preto: participantes.filter(p => p.cor === 'preto').length,
+          azul: participantes.filter(p => p.cor === 'azul').length,
+          vermelho: vermelhos.length,
+          concluido: participantes.filter(p => p.cor === 'concluido').length,
+          total: participantes.length
+        },
+        pagamentos: {
+          confirmados: pagos.length,
+          pendentes: vermelhos.length - pagos.length,
+          total: vermelhos.length,
+          percentual:
+            vermelhos.length > 0 ? (pagos.length / vermelhos.length) * 100 : 0
+        }
+      }
+    })
+
+    res.json({
+      success: true,
+      count: rodadasComStats.length,
+      data: rodadasComStats
+    })
+  } catch (error) {
+    console.error('[ADMIN][RODADAS] Erro:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+}
+
+// ===========================================
+// APROVAR SAQUE (PIX automatico)
 // ===========================================
 exports.aprovarSaque = async (req, res) => {
   try {
@@ -601,22 +801,19 @@ exports.setInfluenciador = async (req, res) => {
         .status(400)
         .json({ success: false, error: 'isInfluenciador deve ser boolean' })
     }
-
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
+      return res.status(400).json({ success: false, error: 'ID invalido' })
     }
 
     const usuario = await User.findById(id)
     if (!usuario) {
       return res
         .status(404)
-        .json({ success: false, error: 'Usuário não encontrado' })
+        .json({ success: false, error: 'Usuario nao encontrado' })
     }
 
     const eraInfluenciador = usuario.isInfluenciador === true
 
-    // Marcar como influenciador pela PRIMEIRA vez → registra a data
-    // Desmarcar NÃO limpa dataInfluenciador (direito adquirido)
     if (isInfluenciador && !usuario.dataInfluenciador) {
       usuario.dataInfluenciador = new Date()
       console.log(
@@ -641,7 +838,7 @@ exports.setInfluenciador = async (req, res) => {
 
     res.json({
       success: true,
-      message: `Usuário ${
+      message: `Usuario ${
         isInfluenciador ? 'marcado' : 'desmarcado'
       } como influenciador`,
       data: {
@@ -658,7 +855,7 @@ exports.setInfluenciador = async (req, res) => {
 }
 
 // ===========================================
-// LISTAR COMISSÕES (com filtros)
+// LISTAR COMISSOES (com filtros)
 // ===========================================
 exports.getComissoes = async (req, res) => {
   try {
@@ -709,13 +906,13 @@ exports.getComissoes = async (req, res) => {
 }
 
 // ===========================================
-// COMISSÕES DE UM USUÁRIO ESPECÍFICO
+// COMISSOES DE UM USUARIO ESPECIFICO
 // ===========================================
 exports.getComissoesUsuario = async (req, res) => {
   try {
     const { id } = req.params
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'ID inválido' })
+      return res.status(400).json({ success: false, error: 'ID invalido' })
     }
 
     const [comissoes, totais] = await Promise.all([

@@ -39,6 +39,10 @@ router.post(
 // ===========================================
 // RODADAS
 // ===========================================
+// ⬇️ NOVO — listagem com stats inline (deve vir ANTES do /:id)
+router.get('/rodadas', adminController.getRodadasAdmin)
+
+// Detalhe completo de uma rodada
 router.get(
   '/rodadas/:id',
   validateObjectId(['id']),
