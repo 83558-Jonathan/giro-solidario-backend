@@ -40,7 +40,7 @@ const transporter = nodemailer.createTransport({
 
 const FROM = () =>
   `"Giro Premiado" <${
-    process.env.SMTP_USER || 'naoresponder@giropremiados.com.br'
+    process.env.SMTP_USER || 'mail@giropremiados.com.br'
   }>`
 
 // ===========================================

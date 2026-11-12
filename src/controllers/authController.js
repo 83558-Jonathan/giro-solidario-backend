@@ -565,7 +565,7 @@ exports.forgotPassword = async (req, res) => {
 
     await transporter.sendMail({
       from: `"Giro Premiado" <${
-        process.env.SMTP_USER || 'naoresponder@giropremiados.com.br'
+        process.env.SMTP_USER || 'mail@giropremiados.com.br'
       }>`,
       to: usuario.email,
       subject: '🔐 Recuperação de Senha - Giro Premiado',
