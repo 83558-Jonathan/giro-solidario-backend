@@ -8,7 +8,6 @@ const RodadaService = require('../services/rodadaService')
 const SolicitacaoSaque = require('../models/SolicitacaoSaque')
 const nodemailer = require('nodemailer')
 
-// NOVO: serviços de engajamento
 const emailController = require('./emailController')
 const pushService = require('../services/pushService')
 const activityService = require('../services/activityService')
@@ -55,52 +54,48 @@ function rodadaPodeReceberVermelho (rodada) {
 
 async function buscarRodadaDisponivelParaNovoUsuario () {
   try {
-    console.log(`\n🔍 [SEM CONVITE] Buscando rodada disponível...`)
-    const rodadaEmAndamento = await Rodada.findOne({
-      status: 'em_andamento',
-      $expr: {
-        $lt: [
-          {
-            $size: {
-              $filter: {
-                input: '$participantes',
-                as: 'p',
-                cond: { $eq: ['$$p.cor', 'vermelho'] }
-              }
-            }
-          },
-          8
-        ]
-      }
-    }).sort({ createdAt: 1 })
-    if (rodadaEmAndamento && rodadaPodeReceberVermelho(rodadaEmAndamento))
-      return { rodada: rodadaEmAndamento, podeAdicionar: true }
-
-    const rodadaAguardandoComEstrutura = await Rodada.findOne({
-      status: 'aguardando',
-      verde: { $exists: true, $ne: null },
-      pretos: { $exists: true, $ne: [] },
-      azuis: { $exists: true, $ne: [] },
-      $expr: {
-        $lt: [
-          {
-            $size: {
-              $filter: {
-                input: '$participantes',
-                as: 'p',
-                cond: { $eq: ['$$p.cor', 'vermelho'] }
-              }
-            }
-          },
-          8
-        ]
-      }
-    }).sort({ createdAt: 1 })
-    if (
-      rodadaAguardandoComEstrutura &&
-      rodadaPodeReceberVermelho(rodadaAguardandoComEstrutura)
+    console.log(
+      `\n🔍 [SEM CONVITE] Buscando rodada disponível (Prioridade: MAIS CHEIA)...`
     )
-      return { rodada: rodadaAguardandoComEstrutura, podeAdicionar: true }
+
+    // A MÁGICA ACONTECE AQUI: Agregação para ordenar pela rodada mais cheia
+    const rodadasComVaga = await Rodada.aggregate([
+      {
+        $match: {
+          status: { $in: ['em_andamento', 'aguardando'] },
+          verde: { $exists: true, $ne: null },
+          pretos: { $exists: true, $ne: [] },
+          azuis: { $exists: true, $ne: [] }
+        }
+      },
+      {
+        $addFields: {
+          totalParticipantes: { $size: '$participantes' },
+          totalVermelhos: {
+            $size: {
+              $filter: {
+                input: '$participantes',
+                as: 'p',
+                cond: { $eq: ['$$p.cor', 'vermelho'] }
+              }
+            }
+          }
+        }
+      },
+      { $match: { totalVermelhos: { $lt: 8 } } },
+      { $sort: { totalParticipantes: -1, createdAt: 1 } }, // Ordem decrescente (mais cheia primeiro)
+      { $limit: 1 }
+    ])
+
+    if (rodadasComVaga.length > 0) {
+      const rodadaEscolhida = await Rodada.findById(rodadasComVaga[0]._id)
+      if (rodadaEscolhida && rodadaPodeReceberVermelho(rodadaEscolhida)) {
+        console.log(
+          `✅ [SEM CONVITE] Rodada escolhida: ${rodadaEscolhida.nome} (${rodadasComVaga[0].totalParticipantes}/15)`
+        )
+        return { rodada: rodadaEscolhida, podeAdicionar: true }
+      }
+    }
 
     console.log(
       `⚠️ [SEM CONVITE] Nenhuma rodada com vaga disponível. Usuario entrara na FILA DE ESPERA.`
@@ -113,7 +108,7 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
 }
 
 // ===========================================
-// REGISTRAR — nome, email, cpf, senha (+ codigoConvite opcional)
+// REGISTRAR
 // ===========================================
 exports.registrar = async (req, res) => {
   try {
@@ -127,7 +122,6 @@ exports.registrar = async (req, res) => {
 
     const { nome, email, cpf, senha, codigoConvite } = req.body
 
-    // ---- Validações de entrada ----
     if (!nome || !email || !cpf || !senha) {
       return res.status(400).json({
         success: false,
@@ -159,7 +153,6 @@ exports.registrar = async (req, res) => {
       })
     }
 
-    // ---- Verifica duplicidade ----
     const existe = await User.findOne({
       $or: [{ email: emailNormalizado }, { cpf: cpfLimpo }]
     })
@@ -170,7 +163,6 @@ exports.registrar = async (req, res) => {
         .json({ success: false, error: `${campo} já cadastrado` })
     }
 
-    // ---- Cria usuário ----
     const salt = await bcrypt.genSalt(10)
     const senhaHash = await bcrypt.hash(senha, salt)
 
@@ -181,7 +173,6 @@ exports.registrar = async (req, res) => {
       senha: senhaHash,
       chavePix: cpfLimpo,
       tipoChavePix: 'cpf',
-      // NOVO: marca onboarding como não concluído
       onboardingCompleto: false,
       ultimoAcesso: new Date()
     })
@@ -190,9 +181,6 @@ exports.registrar = async (req, res) => {
     await usuario.save()
     console.log(`Usuário ${usuario.nome} salvo com ID: ${usuario._id}`)
 
-    // ===========================================
-    // LÓGICA DE FILA / RODADA / INDICAÇÃO
-    // ===========================================
     let indicador = null,
       rodadaAdicionada = null,
       mensagemAuto = null,
@@ -213,7 +201,6 @@ exports.registrar = async (req, res) => {
           $inc: { totalIndicacoes: 1 }
         })
 
-        // NOVO: notifica indicador (in-app + push + activity)
         const primeiroNomeIndicado = usuario.nome.split(' ')[0]
         notificationService
           .novoIndicado(indicador._id, primeiroNomeIndicado)
@@ -230,6 +217,7 @@ exports.registrar = async (req, res) => {
             console.error('❌ [activity] novoIndicado:', err.message)
           )
 
+        // [PRIORIDADE 1] Tenta entrar na rodada do convidante OBRIGATORIAMENTE
         let rodadaDoIndicador =
           await RodadaService.buscarRodadaParaNovoVermelho(
             indicador._id.toString()
@@ -261,6 +249,7 @@ exports.registrar = async (req, res) => {
             mensagemAuto = `Erro ao adicionar à rodada. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
           }
         } else {
+          // Se a do convidante estiver cheia, vai para a FILA DE ESPERA (Prioridade 1)
           usuario.aguardandoVermelho = true
           posicaoFila = await getProximaPosicaoFila()
           usuario.posicaoFila = posicaoFila
@@ -273,6 +262,7 @@ exports.registrar = async (req, res) => {
         console.log(
           `⚠️ [COM CONVITE] Código ${codigoConvite} não encontrado. Tratando como cadastro sem convite...`
         )
+        // [PRIORIDADE 2] Sem convite: cai na rodada mais cheia
         const { rodada, podeAdicionar } =
           await buscarRodadaDisponivelParaNovoUsuario()
         if (rodada && podeAdicionar) {
@@ -314,6 +304,7 @@ exports.registrar = async (req, res) => {
       console.log(
         `\n🚫 [SEM CONVITE] Usuário cadastrando sem código de convite`
       )
+      // [PRIORIDADE 2] Sem convite: cai na rodada mais cheia
       const { rodada, podeAdicionar } =
         await buscarRodadaDisponivelParaNovoUsuario()
       if (rodada && podeAdicionar) {
@@ -352,31 +343,22 @@ exports.registrar = async (req, res) => {
       }
     }
 
-    // ===========================================
-    // NOVO: ENVIO DE EMAILS E NOTIFICAÇÕES (não bloqueiam a resposta)
-    // ===========================================
-    // 1. Boas-vindas (sempre)
     emailController
       .enviarEmailBoasVindas(usuario, { entrouNaFila, posicaoFila })
       .catch(err => console.error('❌ [email] Boas-vindas:', err.message))
 
-    // 2. QR Code PIX (se gerou)
     if (dadosPagamento) {
       console.log(
         `[registro] Email de QR Code: enviado pelo qrCodeHelper (transacao ${dadosPagamento.id}). Nao duplicando aqui.`
       )
     }
 
-    // 3. Activity log (entrada na rodada)
     if (rodadaIdAdicionada) {
       activityService
         .entrada(usuario._id, usuario.nome, rodadaIdAdicionada)
         .catch(() => {})
     }
 
-    // ===========================================
-    // RESPOSTA
-    // ===========================================
     const token = gerarToken(usuario._id)
     const response = {
       success: true,
@@ -387,7 +369,6 @@ exports.registrar = async (req, res) => {
         email: usuario.email,
         cpf: usuario.cpf,
         codigoConvite: usuario.codigoConvite,
-        // NOVO
         onboardingCompleto: usuario.onboardingCompleto || false
       },
       entrouNaFila,
@@ -409,16 +390,6 @@ exports.registrar = async (req, res) => {
       }
     }
 
-    console.log(`\nREGISTRO CONCLUÍDO COM SUCESSO!`)
-    console.log(`   Usuário: ${usuario.nome}`)
-    console.log(`   Email: ${usuario.email}`)
-    console.log(`   CPF: ${usuario.cpf}`)
-    console.log(`   Chave PIX: ${usuario.chavePix} (${usuario.tipoChavePix})`)
-    console.log(`   Entrou na fila: ${entrouNaFila ? 'SIM' : 'NÃO'}`)
-    console.log(`   Posição na fila: ${posicaoFila || 'N/A'}`)
-    console.log(`   Rodada: ${rodadaAdicionada || 'Nenhuma'}`)
-    console.log(`   Cor: ${corAdicionado || 'Nenhuma'}`)
-    console.log(`   Pagamento: ${dadosPagamento ? 'QR Code gerado' : 'Nenhum'}`)
     res.status(201).json(response)
   } catch (error) {
     console.error('❌ Erro no registro:', error)
@@ -442,7 +413,7 @@ exports.registrar = async (req, res) => {
 }
 
 // ===========================================
-// LOGIN — aceita email ou cpf + senha
+// LOGIN e demais funções (sem alteração)
 // ===========================================
 exports.login = async (req, res) => {
   try {
@@ -480,7 +451,6 @@ exports.login = async (req, res) => {
         .json({ success: false, error: 'Credenciais inválidas' })
     }
 
-    // NOVO: atualiza último acesso
     User.updateOne(
       { _id: usuario._id },
       { $set: { ultimoAcesso: new Date() } }
@@ -497,7 +467,6 @@ exports.login = async (req, res) => {
         cpf: usuario.cpf,
         codigoConvite: usuario.codigoConvite,
         role: usuario.role,
-        // NOVO
         onboardingCompleto: usuario.onboardingCompleto || false
       }
     })
@@ -510,9 +479,6 @@ exports.login = async (req, res) => {
   }
 }
 
-// ===========================================
-// GET ME
-// ===========================================
 exports.getMe = async (req, res) => {
   try {
     const usuario = await User.findById(req.usuarioId)
@@ -553,9 +519,6 @@ exports.getMe = async (req, res) => {
   }
 }
 
-// ===========================================
-// FORGOT PASSWORD
-// ===========================================
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body
@@ -621,9 +584,6 @@ exports.forgotPassword = async (req, res) => {
   }
 }
 
-// ===========================================
-// RESET PASSWORD
-// ===========================================
 exports.resetPassword = async (req, res) => {
   try {
     const { token, senha } = req.body
