@@ -25,10 +25,18 @@ let ioInstance = null
 const processandoVermelhoLock = new Map()
 
 function rodadaTemEstruturaCompleta (rodada) {
-  const verdeOk = !!rodada.verde
-  const pretosOk = Array.isArray(rodada.pretos) && rodada.pretos.length === 2
-  const azuisOk = Array.isArray(rodada.azuis) && rodada.azuis.length === 4
-  return verdeOk && pretosOk && azuisOk
+  if (!rodada) return false
+  const p = rodada.participantes || []
+
+  const temVerde = !!rodada.verde || p.some(x => x.cor === 'verde')
+  const temPretos =
+    (Array.isArray(rodada.pretos) && rodada.pretos.length === 2) ||
+    p.filter(x => x.cor === 'preto').length === 2
+  const temAzuis =
+    (Array.isArray(rodada.azuis) && rodada.azuis.length === 4) ||
+    p.filter(x => x.cor === 'azul').length === 4
+
+  return temVerde && temPretos && temAzuis
 }
 
 async function getProximaPosicaoFilaSegura () {
@@ -99,8 +107,6 @@ async function notificarPromocao ({ usuarioId, corAnterior, corNova, rodada }) {
         .catch(err => console.error('[notif] notificarPromocao:', err.message))
     }
 
-    // ✅ FIX APLICADO: só envia email de progressão se NÃO for concluído
-    // (concluído é tratado por enviarEmailPremio abaixo)
     if (corNova !== 'concluido') {
       emailController
         .enviarEmailRodadaAvancada(u, rodada, corNova, corAnterior)
@@ -187,15 +193,39 @@ class RodadaService {
       const result = await Rodada.aggregate([
         {
           $match: {
-            status: { $in: ['em_andamento', 'aguardando'] },
-            verde: { $type: 'objectId' },
-            pretos: { $type: 'array', $ne: [] },
-            azuis: { $type: 'array', $ne: [] }
+            status: { $in: ['em_andamento', 'aguardando'] }
           }
         },
         {
           $addFields: {
             totalParticipantes: { $size: '$participantes' },
+            totalVerdes: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'verde'] }
+                }
+              }
+            },
+            totalPretos: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'preto'] }
+                }
+              }
+            },
+            totalAzuis: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'azul'] }
+                }
+              }
+            },
             totalVermelhos: {
               $size: {
                 $filter: {
@@ -207,8 +237,16 @@ class RodadaService {
             }
           }
         },
-        { $match: { totalVermelhos: { $lt: 8 } } },
-        { $sort: { totalParticipantes: -1, createdAt: 1 } },
+        {
+          $match: {
+            totalVerdes: { $gte: 1 },
+            totalPretos: { $gte: 2 },
+            totalAzuis: { $gte: 4 },
+            totalVermelhos: { $lt: 8 },
+            totalParticipantes: { $lt: 15 }
+          }
+        },
+        { $sort: { totalVermelhos: -1, totalParticipantes: -1, createdAt: 1 } },
         { $limit: 1 }
       ])
 
@@ -282,9 +320,6 @@ class RodadaService {
     }
   }
 
-  // ===========================================
-  // Retorno honesto com { adicionado: boolean, motivo }
-  // ===========================================
   async adicionarParticipanteVermelho (rodadaId, usuarioId, indicadorId = null) {
     const lockKey = `${rodadaId}_${usuarioId}`
     while (processandoVermelhoLock.has(lockKey)) {
@@ -862,15 +897,39 @@ class RodadaService {
       const rodadasComVagasAgg = await Rodada.aggregate([
         {
           $match: {
-            status: { $in: ['aguardando', 'em_andamento'] },
-            verde: { $type: 'objectId' },
-            pretos: { $type: 'array', $ne: [] },
-            azuis: { $type: 'array', $ne: [] }
+            status: { $in: ['aguardando', 'em_andamento'] }
           }
         },
         {
           $addFields: {
             totalParticipantes: { $size: '$participantes' },
+            totalVerdes: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'verde'] }
+                }
+              }
+            },
+            totalPretos: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'preto'] }
+                }
+              }
+            },
+            totalAzuis: {
+              $size: {
+                $filter: {
+                  input: '$participantes',
+                  as: 'p',
+                  cond: { $eq: ['$$p.cor', 'azul'] }
+                }
+              }
+            },
             totalVermelhos: {
               $size: {
                 $filter: {
@@ -882,8 +941,16 @@ class RodadaService {
             }
           }
         },
-        { $match: { totalVermelhos: { $lt: 8 } } },
-        { $sort: { totalParticipantes: -1, createdAt: 1 } }
+        {
+          $match: {
+            totalVerdes: { $gte: 1 },
+            totalPretos: { $gte: 2 },
+            totalAzuis: { $gte: 4 },
+            totalVermelhos: { $lt: 8 },
+            totalParticipantes: { $lt: 15 }
+          }
+        },
+        { $sort: { totalVermelhos: -1, totalParticipantes: -1, createdAt: 1 } }
       ])
 
       if (rodadasComVagasAgg.length === 0) {

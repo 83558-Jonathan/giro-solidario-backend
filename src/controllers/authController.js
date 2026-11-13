@@ -37,40 +37,67 @@ async function getProximaPosicaoFila () {
 
 function rodadaPodeReceberVermelho (rodada) {
   if (!rodada) return false
-  const temEstrutura = !!(
-    rodada.verde &&
-    Array.isArray(rodada.pretos) &&
-    rodada.pretos.length === 2 &&
-    Array.isArray(rodada.azuis) &&
-    rodada.azuis.length === 4
-  )
+  const p = rodada.participantes || []
+
+  const temVerde = !!rodada.verde || p.some(x => x.cor === 'verde')
+  const temPretos =
+    (Array.isArray(rodada.pretos) && rodada.pretos.length === 2) ||
+    p.filter(x => x.cor === 'preto').length === 2
+  const temAzuis =
+    (Array.isArray(rodada.azuis) && rodada.azuis.length === 4) ||
+    p.filter(x => x.cor === 'azul').length === 4
+
+  const temEstrutura = temVerde && temPretos && temAzuis
   const podeReceber =
     rodada.status === 'em_andamento' ||
     (rodada.status === 'aguardando' && temEstrutura)
-  const vagasVermelho =
-    8 - (rodada.participantes?.filter(p => p.cor === 'vermelho').length || 0)
+  const vagasVermelho = 8 - p.filter(x => x.cor === 'vermelho').length
+
   return podeReceber && vagasVermelho > 0
 }
 
 async function buscarRodadaDisponivelParaNovoUsuario () {
   try {
     console.log(
-      `\n🔍 [SEM CONVITE] Buscando rodada disponível (Prioridade: MAIS CHEIA)...`
+      `\n🔍 [SEM CONVITE] Buscando rodada disponível (Prioridade: MAIS VERMELHOS)...`
     )
 
     const rodadasComVaga = await Rodada.aggregate([
       {
         $match: {
-          status: { $in: ['em_andamento', 'aguardando'] },
-          // ✅ FIX: $type 'objectId' em vez de $ne:null (mais robusto)
-          verde: { $type: 'objectId' },
-          pretos: { $type: 'array', $ne: [] },
-          azuis: { $type: 'array', $ne: [] }
+          status: { $in: ['em_andamento', 'aguardando'] }
         }
       },
       {
         $addFields: {
           totalParticipantes: { $size: '$participantes' },
+          totalVerdes: {
+            $size: {
+              $filter: {
+                input: '$participantes',
+                as: 'p',
+                cond: { $eq: ['$$p.cor', 'verde'] }
+              }
+            }
+          },
+          totalPretos: {
+            $size: {
+              $filter: {
+                input: '$participantes',
+                as: 'p',
+                cond: { $eq: ['$$p.cor', 'preto'] }
+              }
+            }
+          },
+          totalAzuis: {
+            $size: {
+              $filter: {
+                input: '$participantes',
+                as: 'p',
+                cond: { $eq: ['$$p.cor', 'azul'] }
+              }
+            }
+          },
           totalVermelhos: {
             $size: {
               $filter: {
@@ -82,8 +109,16 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
           }
         }
       },
-      { $match: { totalVermelhos: { $lt: 8 } } },
-      { $sort: { totalParticipantes: -1, createdAt: 1 } },
+      {
+        $match: {
+          totalVerdes: { $gte: 1 },
+          totalPretos: { $gte: 2 },
+          totalAzuis: { $gte: 4 },
+          totalVermelhos: { $lt: 8 },
+          totalParticipantes: { $lt: 15 }
+        }
+      },
+      { $sort: { totalVermelhos: -1, totalParticipantes: -1, createdAt: 1 } },
       { $limit: 1 }
     ])
 
@@ -91,7 +126,7 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       const rodadaEscolhida = await Rodada.findById(rodadasComVaga[0]._id)
       if (rodadaEscolhida && rodadaPodeReceberVermelho(rodadaEscolhida)) {
         console.log(
-          `✅ [SEM CONVITE] Rodada escolhida: ${rodadaEscolhida.nome} (${rodadasComVaga[0].totalParticipantes}/15)`
+          `✅ [SEM CONVITE] Rodada escolhida: ${rodadaEscolhida.nome} (${rodadasComVaga[0].totalVermelhos}/8 vermelhos, ${rodadasComVaga[0].totalParticipantes}/15 pessoas)`
         )
         return { rodada: rodadaEscolhida, podeAdicionar: true }
       }
@@ -190,9 +225,6 @@ exports.registrar = async (req, res) => {
       posicaoFila = null,
       dadosPagamento = null
 
-    // =====================================================
-    // HELPER: aplica fila de verdade quando não foi adicionado
-    // =====================================================
     async function colocarNaFila (motivo) {
       usuario.aguardandoVermelho = true
       posicaoFila = await getProximaPosicaoFila()
@@ -230,7 +262,6 @@ exports.registrar = async (req, res) => {
             console.error('❌ [activity] novoIndicado:', err.message)
           )
 
-        // [PRIORIDADE 1] Tenta entrar na rodada do convidante
         let rodadaDoIndicador =
           await RodadaService.buscarRodadaParaNovoVermelho(
             indicador._id.toString()
@@ -242,7 +273,6 @@ exports.registrar = async (req, res) => {
               usuario._id.toString(),
               indicador._id.toString()
             )
-            // ✅ FIX: só marca sucesso se adicionado=true
             if (resultado && resultado.adicionado === true) {
               rodadaAdicionada = rodadaDoIndicador.nome
               corAdicionado = 'vermelho'
@@ -335,15 +365,12 @@ exports.registrar = async (req, res) => {
       }
     }
 
-    // ✅ FIX adicional: se há vagas mas fomos pra fila por algum motivo,
-    // tenta alocar imediatamente (auto-recuperação)
     if (entrouNaFila) {
       try {
         const alocados = await RodadaService.alocarFilaEmTodasRodadas()
         if (alocados > 0) {
           const usuarioAtualizado = await User.findById(usuario._id)
           if (usuarioAtualizado && !usuarioAtualizado.aguardandoVermelho) {
-            // Foi alocado! Atualiza estado local
             const rodadaAlocada = await Rodada.findOne({
               'participantes.usuario': usuario._id,
               status: { $in: ['aguardando', 'em_andamento'] }
