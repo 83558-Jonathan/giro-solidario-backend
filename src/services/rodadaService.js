@@ -99,9 +99,13 @@ async function notificarPromocao ({ usuarioId, corAnterior, corNova, rodada }) {
         .catch(err => console.error('[notif] notificarPromocao:', err.message))
     }
 
-    emailController
-      .enviarEmailRodadaAvancada(u, rodada, corNova, corAnterior)
-      .catch(err => console.error('[email] notificarPromocao:', err.message))
+    // ✅ FIX APLICADO: só envia email de progressão se NÃO for concluído
+    // (concluído é tratado por enviarEmailPremio abaixo)
+    if (corNova !== 'concluido') {
+      emailController
+        .enviarEmailRodadaAvancada(u, rodada, corNova, corAnterior)
+        .catch(err => console.error('[email] notificarPromocao:', err.message))
+    }
 
     if (corNova === 'concluido') {
       emailController
@@ -178,9 +182,6 @@ class RodadaService {
     }
   }
 
-  // ===========================================
-  // Busca rodada mais cheia com vaga (fix: $type objectId)
-  // ===========================================
   async buscarRodadaMaisCheiaComVaga () {
     try {
       const result = await Rodada.aggregate([
@@ -282,7 +283,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // ✅ FIX: retorno honesto com { adicionado: boolean, motivo }
+  // Retorno honesto com { adicionado: boolean, motivo }
   // ===========================================
   async adicionarParticipanteVermelho (rodadaId, usuarioId, indicadorId = null) {
     const lockKey = `${rodadaId}_${usuarioId}`
@@ -345,7 +346,6 @@ class RodadaService {
         p => p.cor === 'vermelho'
       ).length
       if (!podeReceberVermelho || vermelhosAtuais >= 8) {
-        // ✅ FIX: registra posição na fila se ainda não tiver
         const posicaoFila = await getProximaPosicaoFilaSegura()
         await User.findByIdAndUpdate(usuarioId, {
           aguardandoVermelho: true,
@@ -859,7 +859,6 @@ class RodadaService {
     alocandoFila = true
 
     try {
-      // Filtro robusto com $type: 'objectId'
       const rodadasComVagasAgg = await Rodada.aggregate([
         {
           $match: {

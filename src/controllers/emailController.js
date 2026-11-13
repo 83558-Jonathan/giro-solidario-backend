@@ -39,9 +39,7 @@ const transporter = nodemailer.createTransport({
 })()
 
 const FROM = () =>
-  `"Giro Premiado" <${
-    process.env.SMTP_USER || 'mail@giropremiados.com.br'
-  }>`
+  `"Giro Premiado" <${process.env.SMTP_USER || 'mail@giropremiados.com.br'}>`
 
 // ===========================================
 // TEMPLATE BASE
@@ -199,12 +197,14 @@ async function enviarEmailBoasVindas (
     subject: 'Bem-vindo ao Giro Premiado!',
     html
   })
-  console.log(`[email] Boas-vindas enviadas para ${usuario.email}`)
+  console.log(`[email] ✅ Boas-vindas enviadas para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 2: QR Code PIX (corrigido)
+// EMAIL 2: QR Code PIX (MELHORADO)
 // ===========================================
+// 🎯 MUDANÇA: CTA vai direto para /pagamento/:transacaoId
+// (antes ia pro /dashboard e o usuário tinha que procurar)
 async function enviarEmailQrCodePix (
   usuario,
   transacao,
@@ -213,7 +213,6 @@ async function enviarEmailQrCodePix (
   valor,
   rodada
 ) {
-  // Guard clause: nunca envia email com dados incompletos
   if (!qrCode || !qrCodeImage) {
     console.warn(
       `[email] enviarEmailQrCodePix ABORTADO: qrCode=${!!qrCode}, qrCodeImage=${!!qrCodeImage} (usuario=${
@@ -230,6 +229,12 @@ async function enviarEmailQrCodePix (
   const srcImg = qrCodeImage.startsWith('data:')
     ? qrCodeImage
     : `data:image/png;base64,${qrCodeImage}`
+  const transacaoId = transacao?._id || transacao?.id
+
+  // ⬇️ Link direto para o pagamento (não mais /dashboard)
+  const linkPagamento = transacaoId
+    ? `${frontendUrl}/pagamento/${transacaoId}`
+    : `${frontendUrl}/dashboard`
 
   const conteudo = `
     <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
@@ -268,8 +273,8 @@ async function enviarEmailQrCodePix (
     titulo: 'Pague seu PIX e garanta sua vaga',
     subtitulo: `Valor: ${valorFmt} - Rodada ${nomeRodada}`,
     conteudo,
-    ctaTexto: 'ABRIR MEU DASHBOARD',
-    ctaUrl: `${frontendUrl}/dashboard`
+    ctaTexto: 'PAGAR AGORA',
+    ctaUrl: linkPagamento
   })
 
   await transporter.sendMail({
@@ -278,7 +283,7 @@ async function enviarEmailQrCodePix (
     subject: `Pague ${valorFmt} e garanta sua vaga - ${nomeRodada}`,
     html
   })
-  console.log(`[email] QR Code PIX enviado para ${usuario.email}`)
+  console.log(`[email] ✅ QR Code PIX enviado para ${usuario.email}`)
   return true
 }
 
@@ -332,7 +337,7 @@ async function enviarEmailCobranca (usuario, rodada, valor, tipo = 'cobranca') {
       : `${valorFmt} pendente - nao deixe sua vaga expirar`,
     html
   })
-  console.log(`[email] Cobranca (${tipo}) enviada para ${usuario.email}`)
+  console.log(`[email] ✅ Cobranca (${tipo}) enviada para ${usuario.email}`)
 }
 
 // ===========================================
@@ -362,7 +367,7 @@ async function enviarEmailPremio (usuario, rodada, valor) {
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '',
+    emoji: '🏆',
     titulo: 'Voce ganhou o premio!',
     subtitulo: `Rodada ${nomeRodada} concluida`,
     conteudo,
@@ -376,108 +381,193 @@ async function enviarEmailPremio (usuario, rodada, valor) {
     subject: `Voce ganhou ${valorFmt} no Giro Premiado!`,
     html
   })
-  console.log(`[email] Premio enviado para ${usuario.email}`)
+  console.log(`[email] ✅ Premio enviado para ${usuario.email}`)
 }
 
 // ===========================================
-// EMAIL 5: Rodada avancou
+// EMAIL 5: Progressão de cor (MELHORADO)
 // ===========================================
+// 🎯 MUDANÇA: templates específicos por cor, celebrativos
+// 🎯 MUDANÇA: retorna false se concluido (evita duplicata com enviarEmailPremio)
 async function enviarEmailRodadaAvancada (
   usuario,
   rodada,
   corNova,
   corAnterior
 ) {
+  // ⬇️ PROTEÇÃO: concluido é tratado por enviarEmailPremio
+  if (corNova === 'concluido') {
+    console.log(
+      `[email] enviarEmailRodadaAvancada SKIP (concluido → enviarEmailPremio cuida)`
+    )
+    return false
+  }
+
   const frontendUrl = getFrontendUrl()
   const primeiroNome = usuario.nome?.split(' ')[0] || 'amigo'
   const nomeRodada = rodada?.nome || 'sua rodada'
 
-  const descricoes = {
-    amarelo: {
-      titulo: 'Voce esta na fila',
-      texto: 'Aguarde uma vaga para entrar como VERMELHO.'
-    },
-    vermelho: {
-      titulo: 'Voce e VERMELHO!',
-      texto: `Efetue o pagamento de ${VALOR_VERMELHO_TEXTO} para fazer a roda girar.`
-    },
-    azul: {
-      titulo: 'Voce subiu! Agora e AZUL',
-      texto: 'Sua missao: trazer 2 amigos para a rodada.'
-    },
-    preto: {
-      titulo: 'Voce e PRETO',
-      texto: 'Continue dando suporte a rodada - logo voce sera VERDE!'
-    },
-    verde: {
-      titulo: 'Voce e o VERDE da vez!',
-      texto: `Aguarde os 8 VERMELHOS pagarem para receber ${PREMIO_VERDE_TEXTO}.`
-    },
-    concluido: {
-      titulo: 'Voce ganhou o premio!',
-      texto: `Seu saldo de ${PREMIO_VERDE_TEXTO} ja esta disponivel para saque.`
-    }
-  }
+  let config
 
-  const info = descricoes[corNova] || {
-    titulo: 'Sua cor mudou',
-    texto: `Voce agora e ${corNova?.toUpperCase()}.`
+  switch (corNova) {
+    case 'azul':
+      config = {
+        cor: '#3b82f6',
+        emoji: '🎉',
+        titulo: 'Você avançou! Agora é AZUL',
+        subtitulo: `${nomeRodada} · próximo passo`,
+        heroEmoji: '🔵',
+        mensagem: `Parabéns, <strong>${primeiroNome}</strong>! Você pagou e subiu de VERMELHO para <strong>AZUL</strong> na ${nomeRodada}.`,
+        missao:
+          'Sua nova missão: <strong>convidar 2 amigos</strong> para a rodada. Cada amigo que entrar e pagar rende <strong>R$ 5 de comissão</strong> pra você.',
+        proximoPasso:
+          'Quando os outros participantes avançarem, você vai para PRETO → VERDE → <strong>PRÊMIO de R$ 100</strong>.',
+        ctaTexto: 'CONVIDAR MEUS AMIGOS',
+        ctaUrl: `${frontendUrl}/dashboard`,
+        dica: 'Compartilhe seu link no WhatsApp, Instagram ou onde quiser. Sem limite de comissões.'
+      }
+      break
+
+    case 'preto':
+      config = {
+        cor: '#4b5563',
+        emoji: '🚀',
+        titulo: 'Você é PRETO agora!',
+        subtitulo: `${nomeRodada} · faltam 1 passo`,
+        heroEmoji: '⚫',
+        mensagem: `Incrível, <strong>${primeiroNome}</strong>! Você avançou de AZUL para <strong>PRETO</strong> na ${nomeRodada}.`,
+        missao:
+          'Você está a <strong>1 passo do prêmio</strong>. O próximo avanço te leva para VERDE.',
+        proximoPasso:
+          'Continue acompanhando a rodada. Quando os vermelhos pagarem, você será o VERDE e receberá <strong>R$ 100</strong>!',
+        ctaTexto: 'ACOMPANHAR MINHA RODADA',
+        ctaUrl: `${frontendUrl}/dashboard`,
+        dica: 'Fique de olho no seu dashboard — você é o próximo da fila para o prêmio.'
+      }
+      break
+
+    case 'verde':
+      config = {
+        cor: '#10B981',
+        emoji: '🟢',
+        titulo: 'VOCÊ É O VERDE!',
+        subtitulo: `${nomeRodada} · posição de premiação`,
+        heroEmoji: '🟢',
+        mensagem: `<strong>${primeiroNome}, você é o VERDE!</strong> Chegou no topo da ${nomeRodada}.`,
+        missao:
+          'Seu prêmio de <strong>R$ 100</strong> está garantido. Falta apenas os 8 vermelhos pagarem.',
+        proximoPasso:
+          'Assim que o último vermelho pagar, <strong>R$ 100 serão creditados automaticamente</strong> no seu saldo. Você poderá sacar via PIX ou jogar novamente.',
+        ctaTexto: 'ACOMPANHAR RODADA',
+        ctaUrl: `${frontendUrl}/dashboard`,
+        dica: 'Fique online! Assim que os pagamentos forem confirmados, você recebe uma notificação.'
+      }
+      break
+
+    case 'vermelho':
+      // Caso raro: usuário entrou como vermelho numa rodada nova
+      config = {
+        cor: '#ef4444',
+        emoji: '💳',
+        titulo: 'Você é VERMELHO!',
+        subtitulo: `${nomeRodada} · falta pagar`,
+        heroEmoji: '🔴',
+        mensagem: `Olá <strong>${primeiroNome}</strong>! Você entrou na ${nomeRodada} como <strong>VERMELHO</strong>.`,
+        missao: `Efetue o pagamento de <strong>${VALOR_VERMELHO_TEXTO}</strong> para fazer a roda girar.`,
+        proximoPasso:
+          'Após o pagamento, você sobe para AZUL quando todos os outros vermelhos pagarem.',
+        ctaTexto: 'PAGAR AGORA',
+        ctaUrl: `${frontendUrl}/dashboard`,
+        dica: 'O prazo é de 1 hora. Sem pagamento, sua vaga é liberada.'
+      }
+      break
+
+    default:
+      config = {
+        cor: '#6b7280',
+        emoji: '📢',
+        titulo: `Sua nova posição: ${corNova?.toUpperCase() || 'ATUALIZADA'}`,
+        subtitulo: nomeRodada,
+        heroEmoji: '📢',
+        mensagem: `Sua cor na ${nomeRodada} mudou para <strong>${
+          corNova?.toUpperCase() || '—'
+        }</strong>.`,
+        missao: '',
+        proximoPasso: '',
+        ctaTexto: 'VER MINHA POSIÇÃO',
+        ctaUrl: `${frontendUrl}/dashboard`,
+        dica: ''
+      }
   }
 
   const conteudo = `
-    <p style="margin:0 0 12px 0;">Ola <strong>${primeiroNome}</strong>,</p>
-    <p style="margin:0 0 12px 0;">A ${nomeRodada} avancou e voce tem uma nova posicao:</p>
+    <p style="margin:0 0 12px 0;">Olá <strong>${primeiroNome}</strong>,</p>
+    <p style="margin:0 0 16px 0;font-size:16px;">${config.mensagem}</p>
 
-    <div style="text-align:center;background:#f9fafb;border-radius:12px;padding:24px;margin:16px 0;">
-      <p style="margin:8px 0 4px 0;font-size:18px;font-weight:800;color:#111827;">${
-        info.titulo
-      }</p>
-      <p style="margin:0;color:#6b7280;font-size:14px;">${info.texto}</p>
+    <div style="text-align:center;padding:24px 16px;margin:20px 0;background:linear-gradient(135deg,${
+      config.cor
+    }15,${config.cor}05);border-radius:16px;border:2px solid ${config.cor}30;">
+      <div style="font-size:56px;line-height:1;margin-bottom:12px;">${
+        config.heroEmoji
+      }</div>
+      <p style="margin:0;color:${
+        config.cor
+      };font-size:24px;font-weight:800;letter-spacing:-0.5px;">
+        ${corNova?.toUpperCase()}
+      </p>
+      <p style="margin:4px 0 0 0;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">
+        Nova posição
+      </p>
     </div>
 
     ${
-      corNova === 'azul'
-        ? listaPassos([
-            'Abra o dashboard e gere seu link de convite',
-            'Compartilhe com 2 amigos',
-            'Quando eles se cadastrarem, voce sobe para PRETO'
-          ])
+      config.missao
+        ? `<div style="background:#fef3c7;border-left:4px solid #f59e0b;border-radius:8px;padding:14px 16px;margin:16px 0;">
+            <p style="margin:0;color:#78350f;font-size:14px;line-height:1.5;">${config.missao}</p>
+           </div>`
         : ''
     }
 
     ${
-      corNova === 'verde'
-        ? boxDestaque(
-            `Voce e o sortudo desta rodada! Assim que os 8 VERMELHOS pagarem, voce recebe ${PREMIO_VERDE_TEXTO} automaticamente.`
-          )
+      config.proximoPasso
+        ? `<p style="margin:12px 0;color:#374151;font-size:14px;line-height:1.6;">
+            <strong>Próximo passo:</strong> ${config.proximoPasso}
+           </p>`
+        : ''
+    }
+
+    ${
+      config.dica
+        ? `<p style="margin:16px 0 0 0;color:#6b7280;font-size:13px;font-style:italic;">
+            💡 ${config.dica}
+           </p>`
         : ''
     }
   `
 
   const html = templateBase({
-    cor:
-      corNova === 'verde'
-        ? '#10B981'
-        : corNova === 'azul'
-        ? '#3b82f6'
-        : corNova === 'concluido'
-        ? '#10B981'
-        : '#6b7280',
-    emoji: '',
-    titulo: info.titulo,
-    subtitulo: `${nomeRodada} avancou`,
+    cor: config.cor,
+    emoji: config.emoji,
+    titulo: config.titulo,
+    subtitulo: config.subtitulo,
     conteudo,
-    ctaTexto: 'VER MINHA POSICAO',
-    ctaUrl: `${frontendUrl}/dashboard`
+    ctaTexto: config.ctaTexto,
+    ctaUrl: config.ctaUrl,
+    corTexto: config.cor
   })
 
   await transporter.sendMail({
     from: FROM(),
     to: usuario.email,
-    subject: `${info.titulo} - ${nomeRodada}`,
+    subject: `${config.emoji} ${config.titulo} — ${nomeRodada}`,
     html
   })
-  console.log(`[email] Rodada avancada enviado para ${usuario.email}`)
+  console.log(
+    `[email] ✅ Progressão ${corAnterior || '?'}→${corNova} enviada para ${
+      usuario.email
+    }`
+  )
+  return true
 }
 
 // ===========================================
@@ -519,7 +609,7 @@ async function enviarEmailConvite (usuario, linkConvite) {
     subject: 'Convide amigos e acelere sua rodada!',
     html
   })
-  console.log(`[email] Convite enviado para ${usuario.email}`)
+  console.log(`[email] ✅ Convite enviado para ${usuario.email}`)
 }
 
 // ===========================================
@@ -748,7 +838,7 @@ exports.notificarAdminNovaSolicitacao = async (usuario, rodada, valor) => {
       subject: `Nova solicitacao de saque - ${valorFmt} (${usuario.nome})`,
       html
     })
-    console.log(`[email] Admin notificado sobre saque de ${usuario.nome}`)
+    console.log(`[email] ✅ Admin notificado sobre saque de ${usuario.nome}`)
   } catch (err) {
     console.error('Erro ao notificar admin:', err.message)
   }
@@ -782,7 +872,7 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
 
   const html = templateBase({
     cor: '#10B981',
-    emoji: '',
+    emoji: '💸',
     titulo: 'Seu saque foi aprovado!',
     subtitulo: `PIX de ${valorFmt} enviado`,
     conteudo,
@@ -797,7 +887,7 @@ exports.notificarUsuarioSaqueAprovado = async (usuario, solicitacao) => {
       subject: `Saque de ${valorFmt} aprovado e enviado!`,
       html
     })
-    console.log(`[email] Saque aprovado enviado para ${usuario.email}`)
+    console.log(`[email] ✅ Saque aprovado enviado para ${usuario.email}`)
   } catch (err) {
     console.error(
       'Erro ao notificar usuario sobre saque aprovado:',
@@ -826,7 +916,7 @@ exports.notificarSaqueRecusado = async (usuario, solicitacao, motivo) => {
 
   const html = templateBase({
     cor: '#ef4444',
-    emoji: '',
+    emoji: '❌',
     titulo: 'Seu saque foi recusado',
     subtitulo: `${valorFmt} - ${solicitacao.rodada?.nome || 'Rodada'}`,
     conteudo,
@@ -842,7 +932,7 @@ exports.notificarSaqueRecusado = async (usuario, solicitacao, motivo) => {
       subject: `Saque de ${valorFmt} recusado - veja o motivo`,
       html
     })
-    console.log(`[email] Saque recusado enviado para ${usuario.email}`)
+    console.log(`[email] ✅ Saque recusado enviado para ${usuario.email}`)
   } catch (err) {
     console.error('Erro ao notificar recusa de saque:', err.message)
   }

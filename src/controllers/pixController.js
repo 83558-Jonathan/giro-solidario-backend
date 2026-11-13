@@ -142,9 +142,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
     const usuarioPagador = await User.findById(transacao.pagador)
     const nomePagador = usuarioPagador ? usuarioPagador.nome : 'Alguem'
 
-    // ===========================================
-    // COMISSAO DE INDICACAO (unica ou recorrente)
-    // ===========================================
     const indicadorId =
       usuarioPagador?.indicadoPor || participante.indicadoPor || null
 
@@ -497,7 +494,7 @@ const verificarStatus = async (req, res) => {
 }
 
 // ===========================================
-// RENOVAR COBRANCA (V2)
+// RENOVAR COBRANCA (V2) — com envio de email
 // ===========================================
 const renovarCobrancaPix = async (req, res) => {
   try {
@@ -566,7 +563,36 @@ const renovarCobrancaPix = async (req, res) => {
         }
       ]
     }
+
     await transacao.save()
+
+    // ✅ Envia email com o QR renovado
+    try {
+      const emailController = require('./emailController')
+      const usuario = await User.findById(transacao.pagador)
+      if (
+        usuario &&
+        usuario.email &&
+        typeof emailController.enviarEmailQrCodePix === 'function'
+      ) {
+        await emailController.enviarEmailQrCodePix(
+          usuario,
+          transacao,
+          brCode,
+          brCodeBase64,
+          VALOR_VERMELHO,
+          transacao.rodada
+        )
+        console.log(
+          `[renovarCobranca] ✅ Email com QR renovado enviado para ${usuario.email}`
+        )
+      }
+    } catch (emailError) {
+      console.error(
+        '[renovarCobranca] Erro ao enviar email:',
+        emailError.message
+      )
+    }
 
     res.json({
       success: true,
@@ -628,7 +654,7 @@ const cancelarExpirado = async (req, res) => {
       return res.status(404).json({ error: 'Rodada nao encontrada' })
     }
 
-    // ✅ FIX: monta updateOp dinamicamente, só inclui $unset se este usuário era o verde
+    // ✅ FIX: $unset condicional (só se este usuário era o verde)
     const updateOp = {
       $pull: {
         participantes: { transacaoId: transacaoId },
@@ -848,7 +874,7 @@ async function removerVermelhosInadimplentes () {
       const usuarioId = p.usuario.toString()
       const transacaoId = p.transacaoId
 
-      // ✅ FIX: só unset verde se este usuário era o verde
+      // ✅ FIX: $unset condicional
       const updateOp = {
         $pull: {
           participantes: { _id: p._id },
