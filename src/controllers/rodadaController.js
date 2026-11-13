@@ -16,6 +16,10 @@ exports.criarRodada = async (req, res) => {
   }
 }
 
+// ===========================================
+// ✅ FIX: listarRodadas dispara alocação em background
+// O dashboard pinga a cada 30s → fila zera quase instantânea
+// ===========================================
 exports.listarRodadas = async (req, res) => {
   try {
     const db = mongoose.connection.db
@@ -25,6 +29,27 @@ exports.listarRodadas = async (req, res) => {
       .toArray()
     for (const rodada of rodadasEmAndamento)
       await RodadaService.verificarEAvancarSeNecessario(rodada._id.toString())
+
+    // Alocação em background (não bloqueia a resposta)
+    setImmediate(async () => {
+      try {
+        const naFila = await User.countDocuments({ aguardandoVermelho: true })
+        if (naFila > 0) {
+          const alocados = await RodadaService.alocarFilaEmTodasRodadas()
+          if (alocados > 0) {
+            console.log(
+              `[listarRodadas] ✅ ${alocados} usuário(s) alocado(s) em background`
+            )
+          }
+        }
+      } catch (err) {
+        console.error(
+          '[listarRodadas] Erro na alocação em background:',
+          err.message
+        )
+      }
+    })
+
     const rodadas = await db
       .collection('rodadas')
       .find({})
@@ -81,11 +106,24 @@ exports.adicionarParticipante = async (req, res) => {
         )
       else if (rodada.status === 'em_andamento') {
         try {
-          rodadaAtualizada = await RodadaService.adicionarParticipanteVermelho(
+          const resultado = await RodadaService.adicionarParticipanteVermelho(
             rodadaId,
             usuarioId,
             indicadorId
           )
+          if (resultado && resultado.adicionado === true) {
+            rodadaAtualizada = resultado.rodada
+          } else {
+            entrouNaFila = true
+            const usuario = await User.findById(usuarioId)
+            if (usuario?.aguardandoVermelho)
+              return res.json({
+                success: true,
+                message:
+                  'Nao ha vagas para vermelhos no momento. Voce foi adicionado a fila de espera.',
+                data: { aguardandoVermelho: true, fila: true }
+              })
+          }
         } catch (error) {
           if (
             error.message.includes('sem vagas') ||
@@ -277,9 +315,6 @@ exports.jogarNovamente = async (req, res) => {
   }
 }
 
-// ===========================================
-// SACAR PREMIO — vinculado a uma rodada
-// ===========================================
 exports.sacarPremio = async (req, res) => {
   try {
     const { rodadaId } = req.params
@@ -348,12 +383,10 @@ exports.sacarPremio = async (req, res) => {
           .json({ success: false, error: 'Rodada nao encontrada' })
       }
       if (rodadaCheck.status !== 'concluida') {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: 'Esta rodada ainda nao foi concluida'
-          })
+        return res.status(400).json({
+          success: false,
+          error: 'Esta rodada ainda nao foi concluida'
+        })
       }
       if (rodadaCheck.premioVerdePago === true) {
         return res.status(400).json({
@@ -422,9 +455,6 @@ exports.sacarPremio = async (req, res) => {
   }
 }
 
-// ===========================================
-// SACAR SALDO (premios + comissoes) — sem rodada especifica
-// ===========================================
 exports.sacarSaldo = async (req, res) => {
   try {
     const usuarioId = req.usuarioId
@@ -516,9 +546,6 @@ exports.sacarSaldo = async (req, res) => {
   }
 }
 
-// ===========================================
-// Rodadas prestes a girar (7/8 ou 8/8 pagos)
-// ===========================================
 exports.rodadasEmGiro = async (req, res) => {
   try {
     const rodadas = await Rodada.find({ status: 'em_andamento' })

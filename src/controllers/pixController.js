@@ -144,11 +144,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
 
     // ===========================================
     // COMISSAO DE INDICACAO (unica ou recorrente)
-    // A logica foi centralizada em comissaoService — trata:
-    //   - Comum: paga so 1x (comissaoPaga)
-    //   - Influenciador + indicado criado APOS virar: paga sempre (recorrente)
-    //   - Influenciador + indicado ANTERIOR: paga so 1x
-    //   - Anti-duplicidade por transacaoId (indice unique)
     // ===========================================
     const indicadorId =
       usuarioPagador?.indicadoPor || participante.indicadoPor || null
@@ -164,8 +159,6 @@ async function processarPagamentoComControle (transacaoId, source = 'webhook') {
       })
 
       if (resultadoComissao.success && resultadoComissao.tipo === 'unica') {
-        // Só marca comissaoPaga para 'unica' — recorrente NÃO marca
-        // (para permitir pagar novamente nas próximas transações)
         participante.comissaoPaga = true
       }
     }
@@ -605,7 +598,7 @@ const renovarCobrancaPix = async (req, res) => {
 }
 
 // ===========================================
-// CANCELAR EXPIRADO
+// CANCELAR EXPIRADO (FIX: $unset condicional)
 // ===========================================
 const cancelarExpirado = async (req, res) => {
   const { transacaoId } = req.body
@@ -635,18 +628,19 @@ const cancelarExpirado = async (req, res) => {
       return res.status(404).json({ error: 'Rodada nao encontrada' })
     }
 
-    await Rodada.updateOne(
-      { _id: rodada._id },
-      {
-        $pull: {
-          participantes: { transacaoId: transacaoId },
-          vermelhos: usuarioId,
-          azuis: usuarioId,
-          pretos: usuarioId
-        },
-        $unset: { verde: usuarioId }
+    // ✅ FIX: monta updateOp dinamicamente, só inclui $unset se este usuário era o verde
+    const updateOp = {
+      $pull: {
+        participantes: { transacaoId: transacaoId },
+        vermelhos: usuarioId,
+        azuis: usuarioId,
+        pretos: usuarioId
       }
-    )
+    }
+    if (rodada.verde && rodada.verde.toString() === usuarioId.toString()) {
+      updateOp.$unset = { verde: '' }
+    }
+    await Rodada.updateOne({ _id: rodada._id }, updateOp)
 
     const rodadaAtualizada = await Rodada.findById(rodada._id)
     const vermelhosRestantes = rodadaAtualizada.participantes.filter(
@@ -713,6 +707,7 @@ async function processarTransacoesExpiradas () {
       )
       rodada.azuis = rodada.azuis.filter(id => id.toString() !== usuarioIdStr)
       rodada.pretos = rodada.pretos.filter(id => id.toString() !== usuarioIdStr)
+      // ✅ FIX: só zera verde se este usuário ERA o verde
       if (rodada.verde && rodada.verde.toString() === usuarioIdStr)
         rodada.verde = null
 
@@ -806,7 +801,7 @@ const enviarPixSaque = async (
 }
 
 // ===========================================
-// REMOVER VERMELHOS INADIMPLENTES
+// REMOVER VERMELHOS INADIMPLENTES (FIX: $unset condicional)
 // ===========================================
 async function removerVermelhosInadimplentes () {
   const agora = new Date()
@@ -853,18 +848,20 @@ async function removerVermelhosInadimplentes () {
       const usuarioId = p.usuario.toString()
       const transacaoId = p.transacaoId
 
-      await Rodada.updateOne(
-        { _id: rodada._id },
-        {
-          $pull: {
-            participantes: { _id: p._id },
-            vermelhos: usuarioId,
-            azuis: usuarioId,
-            pretos: usuarioId
-          },
-          $unset: { verde: usuarioId }
+      // ✅ FIX: só unset verde se este usuário era o verde
+      const updateOp = {
+        $pull: {
+          participantes: { _id: p._id },
+          vermelhos: usuarioId,
+          azuis: usuarioId,
+          pretos: usuarioId
         }
-      )
+      }
+      if (rodada.verde && rodada.verde.toString() === usuarioId) {
+        updateOp.$unset = { verde: '' }
+      }
+      await Rodada.updateOne({ _id: rodada._id }, updateOp)
+
       if (transacaoId)
         await Transacao.updateOne(
           { _id: transacaoId },

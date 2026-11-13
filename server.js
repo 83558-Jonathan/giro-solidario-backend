@@ -34,6 +34,9 @@ const {
 } = require('./src/controllers/pixController')
 const expiraPixJob = require('./src/jobs/expiraPix')
 
+// ⬇️ NOVO: Job de alocação automática da fila (rede de segurança)
+const filaJob = require('./src/jobs/filaJob')
+
 // NOVOS SERVIÇOS
 const pushService = require('./src/services/pushService')
 const activityService = require('./src/services/activityService')
@@ -53,7 +56,7 @@ cron.schedule('0 * * * *', () => {
   )
 })
 
-// NOVO: Re-engagement — usuários inativos há 3+ dias
+// Re-engagement — usuários inativos há 3+ dias
 cron.schedule('0 10 * * *', async () => {
   try {
     console.log('⏰ [CRON-REENGAGE] Buscando usuários inativos...')
@@ -84,11 +87,10 @@ cron.schedule('0 10 * * *', async () => {
   }
 })
 
-// NOVO: Rodada quase completa — a cada 1 minuto, dispara push pra fila
+// Rodada quase completa — a cada 1 minuto, dispara push pra fila
 let pushRodadaQuaseCompleta = new Map() // rodadaId → timestamp do último envio
 cron.schedule('* * * * *', async () => {
   try {
-    // Busca rodadas com 7/8 vermelhos que NÃO avisamos nos últimos 10 min
     const dezMinAtras = Date.now() - 10 * 60 * 1000
     const rodadas = await Rodada.find({
       status: { $in: ['em_andamento', 'aguardando'] }
@@ -128,13 +130,24 @@ cron.schedule('* * * * *', async () => {
   }
 })
 
-// Alocação periódica da fila (a cada 10s)
+// ===========================================
+// ✅ MELHORADO: Alocação periódica da fila (a cada 10s)
+// Só roda se HOUVER fila → evita queries desnecessárias
+// ===========================================
 setInterval(async () => {
   try {
-    console.log(`\n[CRON] Verificando e alocando fila de espera...`)
-    await RodadaService.alocarFilaEmTodasRodadas()
+    // Verificação rápida: só aloca se tiver alguém na fila
+    const naFila = await User.countDocuments({ aguardandoVermelho: true })
+    if (naFila === 0) return
+
+    const alocados = await RodadaService.alocarFilaEmTodasRodadas()
+    if (alocados > 0) {
+      console.log(
+        `⚡ [FILA-10s] ✅ ${alocados} usuário(s) alocado(s) (${naFila} estavam na fila)`
+      )
+    }
   } catch (error) {
-    console.error('[CRON] Erro na alocação periódica da fila:', error.message)
+    console.error('[FILA-10s] ❌ Erro na alocação periódica:', error.message)
   }
 }, 10000)
 
@@ -233,7 +246,6 @@ app.use(
       callback(new Error('Not allowed by CORS'))
     },
     credentials: true,
-    //  FIX 1: adicionado PATCH na lista de métodos permitidos
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
@@ -375,7 +387,6 @@ app.use((req, res, next) => {
   }
 })
 
-//  FIX 2: adicionado PATCH na lista de métodos permitidos pelo middleware
 app.use((req, res, next) => {
   const allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
   if (!allowedMethods.includes(req.method)) {
@@ -519,20 +530,36 @@ mongoose
     minPoolSize: 2
   })
   .then(async () => {
-    console.log('MongoDB Conectado')
-
-    // Inicializar serviços que precisam de io (feito depois do socket.io)
-    // (o socket.io é inicializado mais abaixo, e os serviços recebem io lá)
+    console.log('✅ MongoDB Conectado')
 
     await criarAdmin().catch(err => console.error('Erro ao criar admin:', err))
 
     expiraPixJob
     console.log('⏰ Job de expiração PIX agendado')
 
+    // ⬇️ NOVO: Inicia filaJob (rede de segurança secundária — 2 min)
+    try {
+      filaJob.iniciar(2 * 60 * 1000)
+    } catch (err) {
+      console.error('[filaJob] Erro ao iniciar:', err.message)
+    }
+
+    // ⬇️ MELHORADO: Log de startup mostra estado real da fila
     setTimeout(async () => {
       try {
         console.log(`\n[STARTUP] Executando alocação inicial da fila...`)
-        await RodadaService.alocarFilaEmTodasRodadas()
+        const naFila = await User.countDocuments({ aguardandoVermelho: true })
+        if (naFila === 0) {
+          console.log('[STARTUP] ✅ Fila vazia — nada a alocar')
+          return
+        }
+        const alocados = await RodadaService.alocarFilaEmTodasRodadas()
+        const restantes = await User.countDocuments({
+          aguardandoVermelho: true
+        })
+        console.log(
+          `[STARTUP] ${alocados} usuário(s) alocado(s) · ${restantes} ainda na fila`
+        )
       } catch (err) {
         console.error('[STARTUP] Erro ao alocar fila:', err.message)
       }
@@ -861,6 +888,7 @@ server.listen(PORT, () => {
 🔗 URL: http://localhost:${PORT}
 💬 WebSocket (chat) ativo
 🔔 Push Notification ativo
+🎯 Alocação de fila: a cada 10s (principal) + a cada 2min (filaJob safety net)
 `)
 })
 

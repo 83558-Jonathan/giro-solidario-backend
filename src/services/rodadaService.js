@@ -28,19 +28,18 @@ function rodadaTemEstruturaCompleta (rodada) {
   const verdeOk = !!rodada.verde
   const pretosOk = Array.isArray(rodada.pretos) && rodada.pretos.length === 2
   const azuisOk = Array.isArray(rodada.azuis) && rodada.azuis.length === 4
+  return verdeOk && pretosOk && azuisOk
+}
 
-  console.log(`[rodadaTemEstruturaCompleta] Rodada: ${rodada?.nome || '?'}`)
-  console.log(`   verde: ${rodada.verde} -> ${verdeOk ? 'OK' : 'FALHA'}`)
-  console.log(
-    `   pretos: ${rodada.pretos?.length || 0} -> ${pretosOk ? 'OK' : 'FALHA'}`
-  )
-  console.log(
-    `   azuis: ${rodada.azuis?.length || 0} -> ${azuisOk ? 'OK' : 'FALHA'}`
-  )
-
-  const resultado = verdeOk && pretosOk && azuisOk
-  console.log(`   Resultado: ${resultado ? 'SIM' : 'NAO'}`)
-  return resultado
+async function getProximaPosicaoFilaSegura () {
+  try {
+    const ultimo = await User.findOne({ aguardandoVermelho: true }).sort({
+      posicaoFila: -1
+    })
+    return ultimo ? (ultimo.posicaoFila || 0) + 1 : 1
+  } catch {
+    return 1
+  }
 }
 
 async function notificarPromocao ({ usuarioId, corAnterior, corNova, rodada }) {
@@ -166,18 +165,13 @@ class RodadaService {
 
   async usuarioEstaEmRodadaAtiva (usuarioId) {
     try {
-      const usuarioIdStr = usuarioId.toString()
       const rodadaAtiva = await Rodada.findOne({
         status: { $in: ['aguardando', 'em_andamento'] },
         participantes: {
           $elemMatch: { usuario: usuarioId, cor: { $ne: 'concluido' } }
         }
       })
-
-      if (rodadaAtiva) {
-        return true
-      }
-      return false
+      return !!rodadaAtiva
     } catch (error) {
       console.error('Erro ao verificar rodada ativa:', error)
       return false
@@ -185,7 +179,7 @@ class RodadaService {
   }
 
   // ===========================================
-  // [NOVA FUNÇÃO] Busca a rodada mais cheia com vaga para vermelho
+  // Busca rodada mais cheia com vaga (fix: $type objectId)
   // ===========================================
   async buscarRodadaMaisCheiaComVaga () {
     try {
@@ -193,9 +187,9 @@ class RodadaService {
         {
           $match: {
             status: { $in: ['em_andamento', 'aguardando'] },
-            verde: { $exists: true, $ne: null },
-            pretos: { $exists: true, $ne: [] },
-            azuis: { $exists: true, $ne: [] }
+            verde: { $type: 'objectId' },
+            pretos: { $type: 'array', $ne: [] },
+            azuis: { $type: 'array', $ne: [] }
           }
         },
         {
@@ -287,6 +281,9 @@ class RodadaService {
     }
   }
 
+  // ===========================================
+  // ✅ FIX: retorno honesto com { adicionado: boolean, motivo }
+  // ===========================================
   async adicionarParticipanteVermelho (rodadaId, usuarioId, indicadorId = null) {
     const lockKey = `${rodadaId}_${usuarioId}`
     while (processandoVermelhoLock.has(lockKey)) {
@@ -298,14 +295,24 @@ class RodadaService {
       const estaEmRodadaAtiva = await this.usuarioEstaEmRodadaAtiva(usuarioId)
       if (estaEmRodadaAtiva) {
         await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
-        return { rodada: null, transacao: null }
+        return {
+          adicionado: false,
+          motivo: 'ja_em_rodada_ativa',
+          rodada: null,
+          transacao: null
+        }
       }
 
       let rodada = await Rodada.findById(rodadaId)
       if (!rodada) throw new Error('Rodada nao encontrada')
 
       if (rodada.participantes.some(p => p.usuario.toString() === usuarioId)) {
-        return { rodada, transacao: null }
+        return {
+          adicionado: false,
+          motivo: 'ja_na_rodada',
+          rodada,
+          transacao: null
+        }
       }
 
       if (!rodada.verde) {
@@ -322,6 +329,7 @@ class RodadaService {
             indicadorId
           )
           return {
+            adicionado: true,
             rodada: rodadaAtualizada,
             transacao: null,
             entrouComoAmarelo: true
@@ -337,8 +345,19 @@ class RodadaService {
         p => p.cor === 'vermelho'
       ).length
       if (!podeReceberVermelho || vermelhosAtuais >= 8) {
-        await User.findByIdAndUpdate(usuarioId, { aguardandoVermelho: true })
-        return { rodada, transacao: null }
+        // ✅ FIX: registra posição na fila se ainda não tiver
+        const posicaoFila = await getProximaPosicaoFilaSegura()
+        await User.findByIdAndUpdate(usuarioId, {
+          aguardandoVermelho: true,
+          posicaoFila,
+          dataEntradaFila: new Date()
+        })
+        return {
+          adicionado: false,
+          motivo: 'rodada_cheia_ou_sem_estrutura',
+          rodada,
+          transacao: null
+        }
       }
 
       const novaPosicao = rodada.participantes.length + 1
@@ -363,7 +382,12 @@ class RodadaService {
       )
 
       if (!updatedRodada) {
-        return { rodada: await Rodada.findById(rodadaId), transacao: null }
+        return {
+          adicionado: false,
+          motivo: 'race_condicao',
+          rodada: await Rodada.findById(rodadaId),
+          transacao: null
+        }
       }
 
       rodada = updatedRodada
@@ -428,7 +452,11 @@ class RodadaService {
         }
       }
 
-      return { rodada, transacao: transacaoData }
+      return {
+        adicionado: true,
+        rodada,
+        transacao: transacaoData
+      }
     } catch (error) {
       console.error(`\n[VERMELHO] ERRO:`, error)
       throw error
@@ -831,14 +859,14 @@ class RodadaService {
     alocandoFila = true
 
     try {
-      // [PRIORIDADE 2] Busca todas as rodadas com vagas, ordenando da MAIS CHEIA para a mais vazia
+      // Filtro robusto com $type: 'objectId'
       const rodadasComVagasAgg = await Rodada.aggregate([
         {
           $match: {
             status: { $in: ['aguardando', 'em_andamento'] },
-            verde: { $exists: true, $ne: null },
-            pretos: { $exists: true, $ne: [] },
-            azuis: { $exists: true, $ne: [] }
+            verde: { $type: 'objectId' },
+            pretos: { $type: 'array', $ne: [] },
+            azuis: { $type: 'array', $ne: [] }
           }
         },
         {
@@ -865,7 +893,8 @@ class RodadaService {
       }
 
       const filaUsuarios = await User.find({ aguardandoVermelho: true }).sort({
-        posicaoFila: 1
+        posicaoFila: 1,
+        dataEntradaFila: 1
       })
       if (filaUsuarios.length === 0) {
         alocandoFila = false
@@ -958,10 +987,7 @@ class RodadaService {
               usuario._id,
               null
             )
-            const rodadaDepois = await Rodada.findById(rodadaAtual._id)
-            adicionado = rodadaDepois.participantes.some(
-              p => p.usuario.toString() === usuario._id.toString()
-            )
+            adicionado = resultado && resultado.adicionado === true
           } catch (error) {
             adicionado = false
           }
@@ -1345,7 +1371,6 @@ class RodadaService {
 
   async buscarRodadaAtivaDoUsuario (usuarioId) {
     try {
-      const usuarioIdStr = usuarioId.toString()
       const rodada = await Rodada.findOne({
         status: { $in: ['aguardando', 'em_andamento'] },
         participantes: {
@@ -1546,7 +1571,6 @@ class RodadaService {
           }
         }
 
-        // [PRIORIDADE 2] Usa a helper para buscar a mais cheia
         let rodadaExistente = await this.buscarRodadaMaisCheiaComVaga()
 
         if (
@@ -1593,7 +1617,6 @@ class RodadaService {
       let pagoAutomaticamente = false
       let saldoRestante = saldoAtual
 
-      // [PRIORIDADE 2] Usa a helper para buscar a mais cheia
       let rodadaParaEntrar = await this.buscarRodadaMaisCheiaComVaga()
 
       if (rodadaParaEntrar) {
@@ -1737,7 +1760,7 @@ class RodadaService {
         const ultimo = await User.findOne({ aguardandoVermelho: true }).sort({
           posicaoFila: -1
         })
-        const novaPos = ultimo ? ultimo.posicaoFila + 1 : 1
+        const novaPos = ultimo ? (ultimo.posicaoFila || 0) + 1 : 1
         usuario.aguardandoVermelho = true
         usuario.posicaoFila = novaPos
         usuario.dataEntradaFila = new Date()

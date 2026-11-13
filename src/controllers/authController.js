@@ -28,7 +28,7 @@ async function getProximaPosicaoFila () {
     const ultimoNaFila = await User.findOne({ aguardandoVermelho: true }).sort({
       posicaoFila: -1
     })
-    return ultimoNaFila ? ultimoNaFila.posicaoFila + 1 : 1
+    return ultimoNaFila ? (ultimoNaFila.posicaoFila || 0) + 1 : 1
   } catch (error) {
     console.error('Erro ao buscar próxima posição na fila:', error)
     return 1
@@ -58,14 +58,14 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
       `\n🔍 [SEM CONVITE] Buscando rodada disponível (Prioridade: MAIS CHEIA)...`
     )
 
-    // A MÁGICA ACONTECE AQUI: Agregação para ordenar pela rodada mais cheia
     const rodadasComVaga = await Rodada.aggregate([
       {
         $match: {
           status: { $in: ['em_andamento', 'aguardando'] },
-          verde: { $exists: true, $ne: null },
-          pretos: { $exists: true, $ne: [] },
-          azuis: { $exists: true, $ne: [] }
+          // ✅ FIX: $type 'objectId' em vez de $ne:null (mais robusto)
+          verde: { $type: 'objectId' },
+          pretos: { $type: 'array', $ne: [] },
+          azuis: { $type: 'array', $ne: [] }
         }
       },
       {
@@ -83,7 +83,7 @@ async function buscarRodadaDisponivelParaNovoUsuario () {
         }
       },
       { $match: { totalVermelhos: { $lt: 8 } } },
-      { $sort: { totalParticipantes: -1, createdAt: 1 } }, // Ordem decrescente (mais cheia primeiro)
+      { $sort: { totalParticipantes: -1, createdAt: 1 } },
       { $limit: 1 }
     ])
 
@@ -190,6 +190,19 @@ exports.registrar = async (req, res) => {
       posicaoFila = null,
       dadosPagamento = null
 
+    // =====================================================
+    // HELPER: aplica fila de verdade quando não foi adicionado
+    // =====================================================
+    async function colocarNaFila (motivo) {
+      usuario.aguardandoVermelho = true
+      posicaoFila = await getProximaPosicaoFila()
+      usuario.posicaoFila = posicaoFila
+      usuario.dataEntradaFila = new Date()
+      await usuario.save()
+      entrouNaFila = true
+      mensagemAuto = `Sem vaga disponível (${motivo}). Você está na FILA DE ESPERA, posição ${posicaoFila}.`
+    }
+
     if (codigoConvite) {
       console.log(`\n🔗 [COM CONVITE] Código recebido: ${codigoConvite}`)
       indicador = await User.findOne({ codigoConvite })
@@ -217,7 +230,7 @@ exports.registrar = async (req, res) => {
             console.error('❌ [activity] novoIndicado:', err.message)
           )
 
-        // [PRIORIDADE 1] Tenta entrar na rodada do convidante OBRIGATORIAMENTE
+        // [PRIORIDADE 1] Tenta entrar na rodada do convidante
         let rodadaDoIndicador =
           await RodadaService.buscarRodadaParaNovoVermelho(
             indicador._id.toString()
@@ -229,40 +242,34 @@ exports.registrar = async (req, res) => {
               usuario._id.toString(),
               indicador._id.toString()
             )
-            rodadaAdicionada = rodadaDoIndicador.nome
-            corAdicionado = 'vermelho'
-            rodadaIdAdicionada = rodadaDoIndicador._id
-            entrouNaFila = false
-            if (resultado.transacao) {
-              dadosPagamento = resultado.transacao
-              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor} para confirmar.`
-            } else
-              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}, mas não foi possível gerar o QR Code. Entre em contato.`
+            // ✅ FIX: só marca sucesso se adicionado=true
+            if (resultado && resultado.adicionado === true) {
+              rodadaAdicionada = rodadaDoIndicador.nome
+              corAdicionado = 'vermelho'
+              rodadaIdAdicionada = rodadaDoIndicador._id
+              entrouNaFila = false
+              if (resultado.transacao) {
+                dadosPagamento = resultado.transacao
+                mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor} para confirmar.`
+              } else {
+                mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaDoIndicador.nome}, mas não foi possível gerar o QR Code.`
+              }
+            } else {
+              await colocarNaFila(
+                resultado?.motivo || 'rodada_convidante_cheia'
+              )
+            }
           } catch (error) {
             console.error('❌ Erro ao adicionar como vermelho:', error)
-            usuario.aguardandoVermelho = true
-            posicaoFila = await getProximaPosicaoFila()
-            usuario.posicaoFila = posicaoFila
-            usuario.dataEntradaFila = new Date()
-            await usuario.save()
-            entrouNaFila = true
-            mensagemAuto = `Erro ao adicionar à rodada. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
+            await colocarNaFila('erro_ao_adicionar')
           }
         } else {
-          // Se a do convidante estiver cheia, vai para a FILA DE ESPERA (Prioridade 1)
-          usuario.aguardandoVermelho = true
-          posicaoFila = await getProximaPosicaoFila()
-          usuario.posicaoFila = posicaoFila
-          usuario.dataEntradaFila = new Date()
-          await usuario.save()
-          entrouNaFila = true
-          mensagemAuto = `A rodada do seu convidante não pode receber mais vermelhos. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
+          await colocarNaFila('rodada_convidante_sem_vaga')
         }
       } else {
         console.log(
           `⚠️ [COM CONVITE] Código ${codigoConvite} não encontrado. Tratando como cadastro sem convite...`
         )
-        // [PRIORIDADE 2] Sem convite: cai na rodada mais cheia
         const { rodada, podeAdicionar } =
           await buscarRodadaDisponivelParaNovoUsuario()
         if (rodada && podeAdicionar) {
@@ -272,39 +279,31 @@ exports.registrar = async (req, res) => {
               usuario._id.toString(),
               null
             )
-            rodadaAdicionada = rodada.nome
-            corAdicionado = 'vermelho'
-            rodadaIdAdicionada = rodada._id
-            entrouNaFila = false
-            if (resultado.transacao) {
-              dadosPagamento = resultado.transacao
-              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
-            } else
-              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+            if (resultado && resultado.adicionado === true) {
+              rodadaAdicionada = rodada.nome
+              corAdicionado = 'vermelho'
+              rodadaIdAdicionada = rodada._id
+              entrouNaFila = false
+              if (resultado.transacao) {
+                dadosPagamento = resultado.transacao
+                mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+              } else {
+                mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+              }
+            } else {
+              await colocarNaFila(resultado?.motivo || 'rodada_cheia')
+            }
           } catch (error) {
-            usuario.aguardandoVermelho = true
-            posicaoFila = await getProximaPosicaoFila()
-            usuario.posicaoFila = posicaoFila
-            usuario.dataEntradaFila = new Date()
-            await usuario.save()
-            entrouNaFila = true
-            mensagemAuto = `Erro ao adicionar. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
+            await colocarNaFila('erro_ao_adicionar')
           }
         } else {
-          usuario.aguardandoVermelho = true
-          posicaoFila = await getProximaPosicaoFila()
-          usuario.posicaoFila = posicaoFila
-          usuario.dataEntradaFila = new Date()
-          await usuario.save()
-          entrouNaFila = true
-          mensagemAuto = `Nenhuma vaga disponível. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
+          await colocarNaFila('nenhuma_rodada_disponivel')
         }
       }
     } else {
       console.log(
         `\n🚫 [SEM CONVITE] Usuário cadastrando sem código de convite`
       )
-      // [PRIORIDADE 2] Sem convite: cai na rodada mais cheia
       const { rodada, podeAdicionar } =
         await buscarRodadaDisponivelParaNovoUsuario()
       if (rodada && podeAdicionar) {
@@ -314,44 +313,77 @@ exports.registrar = async (req, res) => {
             usuario._id.toString(),
             null
           )
-          rodadaAdicionada = rodada.nome
-          corAdicionado = 'vermelho'
-          rodadaIdAdicionada = rodada._id
-          entrouNaFila = false
-          if (resultado.transacao) {
-            dadosPagamento = resultado.transacao
-            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
-          } else
-            mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+          if (resultado && resultado.adicionado === true) {
+            rodadaAdicionada = rodada.nome
+            corAdicionado = 'vermelho'
+            rodadaIdAdicionada = rodada._id
+            entrouNaFila = false
+            if (resultado.transacao) {
+              dadosPagamento = resultado.transacao
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}. Efetue o pagamento de R$ ${dadosPagamento.valor}.`
+            } else {
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodada.nome}, mas QR Code não gerado.`
+            }
+          } else {
+            await colocarNaFila(resultado?.motivo || 'rodada_cheia')
+          }
         } catch (error) {
-          usuario.aguardandoVermelho = true
-          posicaoFila = await getProximaPosicaoFila()
-          usuario.posicaoFila = posicaoFila
-          usuario.dataEntradaFila = new Date()
-          await usuario.save()
-          entrouNaFila = true
-          mensagemAuto = `Erro ao adicionar. Você foi colocado na FILA DE ESPERA, posição ${posicaoFila}.`
+          await colocarNaFila('erro_ao_adicionar')
         }
       } else {
-        usuario.aguardandoVermelho = true
-        posicaoFila = await getProximaPosicaoFila()
-        usuario.posicaoFila = posicaoFila
-        usuario.dataEntradaFila = new Date()
-        await usuario.save()
-        entrouNaFila = true
-        mensagemAuto = `Nenhuma vaga disponível. Você está na FILA DE ESPERA, posição ${posicaoFila}.`
+        await colocarNaFila('nenhuma_rodada_disponivel')
+      }
+    }
+
+    // ✅ FIX adicional: se há vagas mas fomos pra fila por algum motivo,
+    // tenta alocar imediatamente (auto-recuperação)
+    if (entrouNaFila) {
+      try {
+        const alocados = await RodadaService.alocarFilaEmTodasRodadas()
+        if (alocados > 0) {
+          const usuarioAtualizado = await User.findById(usuario._id)
+          if (usuarioAtualizado && !usuarioAtualizado.aguardandoVermelho) {
+            // Foi alocado! Atualiza estado local
+            const rodadaAlocada = await Rodada.findOne({
+              'participantes.usuario': usuario._id,
+              status: { $in: ['aguardando', 'em_andamento'] }
+            }).sort({ numero: -1 })
+            if (rodadaAlocada) {
+              const part = rodadaAlocada.participantes.find(
+                p => p.usuario.toString() === usuario._id.toString()
+              )
+              rodadaAdicionada = rodadaAlocada.nome
+              corAdicionado = part?.cor || 'vermelho'
+              rodadaIdAdicionada = rodadaAlocada._id
+              entrouNaFila = false
+              posicaoFila = null
+              if (part?.transacaoId) {
+                const t = await Transacao.findById(part.transacaoId).lean()
+                if (t) {
+                  dadosPagamento = {
+                    id: t._id,
+                    qrCode: t.metadata?.qrCode || null,
+                    qrCodeImage: t.metadata?.qrCodeImage || null,
+                    expiraEm: t.metadata?.expiraEm || null,
+                    valor: t.valor
+                  }
+                }
+              }
+              mensagemAuto = `Adicionado como VERMELHO na rodada ${rodadaAlocada.nome}. Efetue o pagamento.`
+            }
+          }
+        }
+      } catch (err) {
+        console.error(
+          '[registrar] Erro na auto-recuperação de fila:',
+          err.message
+        )
       }
     }
 
     emailController
       .enviarEmailBoasVindas(usuario, { entrouNaFila, posicaoFila })
       .catch(err => console.error('❌ [email] Boas-vindas:', err.message))
-
-    if (dadosPagamento) {
-      console.log(
-        `[registro] Email de QR Code: enviado pelo qrCodeHelper (transacao ${dadosPagamento.id}). Nao duplicando aqui.`
-      )
-    }
 
     if (rodadaIdAdicionada) {
       activityService
@@ -413,7 +445,7 @@ exports.registrar = async (req, res) => {
 }
 
 // ===========================================
-// LOGIN e demais funções (sem alteração)
+// LOGIN
 // ===========================================
 exports.login = async (req, res) => {
   try {
